@@ -39,8 +39,15 @@ export function createJobStore({ filePath = join(process.cwd(), 'web', 'data', '
       const job = data.jobs.find((j) => j.id === id)
       return job ? { ...job } : null
     },
-    list(clientId) {
-      return data.jobs.filter((j) => !j.clientId || j.clientId === clientId).sort((a, b) => b.createdAt - a.createdAt)
+    listByControlTokens(tokens = []) {
+      const allowed = new Set(tokens.filter(Boolean))
+      return data.jobs
+        .filter((j) => j.controlToken && allowed.has(j.controlToken))
+        .map((j) => ({ ...j }))
+        .sort((a, b) => b.createdAt - a.createdAt)
+    },
+    list() {
+      return data.jobs.map((j) => ({ ...j })).sort((a, b) => b.createdAt - a.createdAt)
     },
     all() {
       return data.jobs.map((j) => ({ ...j }))

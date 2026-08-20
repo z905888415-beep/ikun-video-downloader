@@ -24,8 +24,7 @@ export function defaultSettings() {
     autoCleanupEnabled: true,
     retentionHours: 24,
     maxDownloadSizeGB: 5,
-    historyLimit: 30,
-    redfoxApiKey: ''
+    historyLimit: 30
   }
 }
 
@@ -74,7 +73,6 @@ export function createSettingsStore({ filePath = DEFAULT_SETTINGS_PATH } = {}) {
       if (partial.historyLimit != null) {
         next.historyLimit = Math.min(500, Math.max(5, Number(partial.historyLimit) || 30))
       }
-      if (partial.redfoxApiKey != null) next.redfoxApiKey = String(partial.redfoxApiKey || '')
       settings = next
       persist()
       return this.get()

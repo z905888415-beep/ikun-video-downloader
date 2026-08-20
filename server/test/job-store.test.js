@@ -29,13 +29,20 @@ test('更新后重新加载是最新状态', () => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('按客户端过滤任务', () => {
+test('控制令牌仅列出对应匿名任务且按创建时间倒序', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ikun-test-'))
   const store = createJobStore({ filePath: join(dir, 'jobs.json') })
-  const j1 = createJob({ clientId: 'c1', resolutionId: 'r1', sourceUrl: 'https://e.com/1', actionId: 'a1' })
-  const j2 = createJob({ clientId: 'c2', resolutionId: 'r2', sourceUrl: 'https://e.com/2', actionId: 'a2' })
-  store.save(j1); store.save(j2)
-  assert.equal(store.list('c1').length, 1)
+  const older = createJob({ controlToken: 'token-a', resolutionId: 'r1', sourceUrl: 'https://e.com/1', actionId: 'a1' })
+  const newer = createJob({ controlToken: 'token-a', resolutionId: 'r2', sourceUrl: 'https://e.com/2', actionId: 'a2' })
+  const other = createJob({ controlToken: 'token-b', resolutionId: 'r3', sourceUrl: 'https://e.com/3', actionId: 'a3' })
+  older.createdAt = 1
+  newer.createdAt = 2
+  other.createdAt = 3
+  store.save(older); store.save(newer); store.save(other)
+  const jobs = store.listByControlTokens(['token-a'])
+  assert.equal(jobs.length, 2)
+  assert.equal(jobs[0].id, newer.id)
+  assert.equal(jobs.every((job) => job.controlToken === 'token-a'), true)
   rmSync(dir, { recursive: true, force: true })
 })
 

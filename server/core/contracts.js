@@ -14,10 +14,11 @@ export function createAction({ label, type, assetIds = [], requiresProcessing = 
   return { id: `act_${randomUUID().slice(0, 12)}`, label, type, assetIds, requiresProcessing, preferredExt }
 }
 
-export function createJob({ clientId, resolutionId, sourceUrl, actionId, mode = 'auto' }) {
+export function createJob({ clientId, controlToken = randomUUID(), resolutionId, sourceUrl, actionId, mode = 'auto' }) {
   return {
     id: `job_${randomUUID().slice(0, 12)}`,
     clientId,
+    controlToken,
     resolutionId,
     sourceUrl,
     actionId,

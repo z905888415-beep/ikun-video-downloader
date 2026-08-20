@@ -11,7 +11,6 @@ import { createJobStore } from '../core/job-store.js'
 import { createRetryPolicy } from '../core/retry-policy.js'
 import { createJobScheduler } from '../core/job-scheduler.js'
 import { createResolution, createAsset, createAction } from '../core/contracts.js'
-import { createBrowserCaptureProvider } from '../providers/browser-capture-provider.js'
 import { createDirectDelivery, createStreamDelivery } from '../delivery/direct-delivery.js'
 import { createFileDelivery } from '../delivery/file-delivery.js'
 
@@ -23,8 +22,6 @@ const downloadsDir = join(process.cwd(), 'test', 'tmp-files')
 function makeApp() {
   const registry = createProviderRegistry()
   const assets = createAssetRegistry()
-  const browserCapture = createBrowserCaptureProvider({ assets })
-  registry.register(browserCapture)
   registry.register({
     id: 'fake', canHandle: () => true,
     resolve: async (url) => {
@@ -74,7 +71,6 @@ function makeApp() {
   app.use('/api/v2', createApiV2Router({
     resolutions,
     assets,
-    browserCapture,
     scheduler,
     store,
     deliveries: {
@@ -161,8 +157,8 @@ test('创建直链任务返回 READY 且不执行下载', async () => {
   assert.equal(dl.data.status, 'READY')
 })
 
-test('无权限读取他人任务返回 JOB_NOT_FOUND', async () => {
-  const res = await fetch(`${base}/api/v2/downloads/job_unknown`, { headers: { 'X-Client-Id': 'other' } })
+test('不存在的任务返回 JOB_NOT_FOUND', async () => {
+  const res = await fetch(`${base}/api/v2/downloads/job_unknown`)
   assert.equal(res.status, 422)
   const body = await res.json()
   assert.equal(body.error.code, 'JOB_NOT_FOUND')
@@ -184,86 +180,59 @@ test('合并任务执行完成且文件可交付', async () => {
   })
   const dl = await dlRes.json()
   const jobId = dl.data.id
+  const jobToken = dlRes.headers.get('x-job-token')
+  assert.ok(jobToken)
   // 轮询直到 COMPLETED（fake 立即完成）
   let status = ''
   for (let i = 0; i < 20; i++) {
-    const poll = await (await fetch(`${base}/api/v2/downloads/${jobId}`, { headers: { 'X-Client-Id': 'c1' } })).json()
+    const poll = await (await fetch(`${base}/api/v2/downloads/${jobId}`, { headers: { 'X-Client-Id': 'c1', 'X-Job-Token': jobToken } })).json()
     status = poll.data.status
     if (status === 'COMPLETED' || status === 'FAILED') break
     await new Promise((r) => setTimeout(r, 50))
   }
   assert.equal(status, 'COMPLETED')
-  const fileRes = await fetch(`${base}/api/v2/assets/${jobId}/content`, { headers: { 'X-Client-Id': 'c1' } })
+  const fileRes = await fetch(`${base}/api/v2/assets/${jobId}/content`, { headers: { 'X-Client-Id': 'c1', 'X-Job-Token': jobToken } })
   assert.equal(fileRes.status, 200)
   const text = await fileRes.text()
   assert.equal(text, 'merged-file-content')
 })
 
-test('捕获上报需要密钥，未授权被拒绝', async () => {
+test('匿名任务仅能由持有控制令牌的浏览器查询和操作', async () => {
+  const resolutionRes = await fetch(`${base}/api/v2/resolutions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Client-Id': 'owner' },
+    body: JSON.stringify({ url: 'https://example.com/protected' })
+  })
+  const resolution = await resolutionRes.json()
+  const directAction = resolution.data.actions.find((action) => action.type === 'direct')
+  const createRes = await fetch(`${base}/api/v2/downloads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Client-Id': 'owner' },
+    body: JSON.stringify({ resolutionId: resolution.data.id, actionId: directAction.id, mode: 'auto' })
+  })
+  assert.equal(createRes.status, 201)
+  const created = await createRes.json()
+  const token = createRes.headers.get('x-job-token')
+  assert.ok(token)
+
+  const untrusted = await fetch(`${base}/api/v2/downloads/${created.data.id}`)
+  assert.equal(untrusted.status, 422)
+
+  const trusted = await fetch(`${base}/api/v2/downloads/${created.data.id}`, { headers: { 'X-Job-Token': token } })
+  assert.equal(trusted.status, 200)
+
+  const emptyList = await fetch(`${base}/api/v2/downloads`)
+  assert.deepEqual((await emptyList.json()).data, [])
+  const ownList = await fetch(`${base}/api/v2/downloads`, { headers: { 'X-Job-Tokens': token } })
+  const ownJobs = (await ownList.json()).data
+  assert.equal(ownJobs.some((job) => job.id === created.data.id), true)
+})
+
+test('浏览器捕获上报端点已移除', async () => {
   const res = await fetch(`${base}/api/v2/capture/report`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Client-Id': 'c1' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sourceUrl: 'https://example.com/v', mediaUrl: 'https://cdn.example.com/cap.mp4' })
   })
-  assert.equal(res.status, 401)
-  const body = await res.json()
-  assert.equal(body.error.code, 'AUTH_REQUIRED')
-})
-
-test('捕获上报后解析命中捕获资产', async () => {
-  const prev = process.env.IKUN_CAPTURE_SECRET
-  process.env.IKUN_CAPTURE_SECRET = 'test-secret'
-  try {
-    const reportRes = await fetch(`${base}/api/v2/capture/report`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Client-Id': 'c1', 'X-Capture-Secret': 'test-secret' },
-      body: JSON.stringify({ sourceUrl: 'https://example.com/captured', mediaUrl: 'https://cdn.example.com/cap.mp4' })
-    })
-    assert.equal(reportRes.status, 201)
-    const resolveRes = await fetch(`${base}/api/v2/resolutions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Client-Id': 'c1' },
-      body: JSON.stringify({ url: 'https://example.com/captured' })
-    })
-    const body = await resolveRes.json()
-    assert.equal(body.data.provider, 'browser-capture')
-    assert.equal(body.data.actions[0].type, 'direct')
-  } finally {
-    if (prev === undefined) delete process.env.IKUN_CAPTURE_SECRET
-    else process.env.IKUN_CAPTURE_SECRET = prev
-  }
-})
-
-test('捕获上报缺字段返回 422', async () => {
-  const prev = process.env.IKUN_CAPTURE_SECRET
-  process.env.IKUN_CAPTURE_SECRET = 'test-secret'
-  try {
-    const res = await fetch(`${base}/api/v2/capture/report`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Client-Id': 'c1', 'X-Capture-Secret': 'test-secret' },
-      body: JSON.stringify({ sourceUrl: 'https://example.com/x' })
-    })
-    assert.equal(res.status, 422)
-    const body = await res.json()
-    assert.equal(body.error.code, 'VALIDATION_ERROR')
-  } finally {
-    if (prev === undefined) delete process.env.IKUN_CAPTURE_SECRET
-    else process.env.IKUN_CAPTURE_SECRET = prev
-  }
-})
-
-test('捕获上报非法源协议返回 422', async () => {
-  const prev = process.env.IKUN_CAPTURE_SECRET
-  process.env.IKUN_CAPTURE_SECRET = 'test-secret'
-  try {
-    const res = await fetch(`${base}/api/v2/capture/report`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Client-Id': 'c1', 'X-Capture-Secret': 'test-secret' },
-      body: JSON.stringify({ sourceUrl: 'javascript:alert(1)', mediaUrl: 'https://cdn.example.com/cap.mp4' })
-    })
-    assert.equal(res.status, 422)
-  } finally {
-    if (prev === undefined) delete process.env.IKUN_CAPTURE_SECRET
-    else process.env.IKUN_CAPTURE_SECRET = prev
-  }
+  assert.equal(res.status, 404)
 })

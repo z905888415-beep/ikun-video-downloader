@@ -26,7 +26,29 @@ function buildQualityLabel(f) {
   return parts.join(' · ')
 }
 
-export function createYtdlpProvider({ execFileImpl = execFileAsync, binDir = '', cookiesFile = '', proxy = '' } = {}) {
+function parseCustomHeaders(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line) => {
+      const separator = line.indexOf(':')
+      if (separator <= 0) return []
+      const name = line.slice(0, separator).trim()
+      const headerValue = line.slice(separator + 1).trim()
+      return name && headerValue ? [[name, headerValue]] : []
+    })
+}
+
+export function createYtdlpProvider({
+  execFileImpl = execFileAsync,
+  binDir = '',
+  cookiesFile = '',
+  proxy = '',
+  retries = 10,
+  fragmentConcurrency = 4,
+  customHeaders = ''
+} = {}) {
   return {
     id: 'ytdlp',
     canHandle() {
@@ -38,8 +60,14 @@ export function createYtdlpProvider({ execFileImpl = execFileAsync, binDir = '',
         '--ignore-config',
         '--encoding', 'utf-8', '--no-playlist', '--no-warnings',
         '--add-header', `User-Agent:${UA}`,
-        '--add-header', 'Accept-Language:zh-CN,zh;q=0.9,en;q=0.8'
+        '--add-header', 'Accept-Language:zh-CN,zh;q=0.9,en;q=0.8',
+        '--retries', String(Math.min(100, Math.max(0, Number(retries) || 0))),
+        '--fragment-retries', String(Math.min(100, Math.max(0, Number(retries) || 0))),
+        '--concurrent-fragments', String(Math.min(8, Math.max(1, Number(fragmentConcurrency) || 1)))
       ]
+      for (const [name, value] of parseCustomHeaders(customHeaders)) {
+        args.push('--add-header', `${name}:${value}`)
+      }
       if (cookiesFile && existsSync(cookiesFile)) {
         args.push('--cookies', cookiesFile)
       }

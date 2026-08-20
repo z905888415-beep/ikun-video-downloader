@@ -1,8 +1,6 @@
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProviderRegistry } from './providers/provider-registry.js'
-import { createBrowserCaptureProvider } from './providers/browser-capture-provider.js'
-import { createRedfoxProvider } from './providers/redfox-provider.js'
 import { createYtdlpProvider } from './providers/ytdlp-provider.js'
 import { createResolutionService } from './core/resolution-service.js'
 import { createAssetRegistry } from './core/asset-registry.js'
@@ -25,11 +23,14 @@ const DATA_DIR = join(WEB_ROOT, 'data')
 export function composeApp({ settings = {} } = {}) {
   const registry = createProviderRegistry()
   const assets = createAssetRegistry()
-  const browserCapture = createBrowserCaptureProvider({ assets })
-  // 捕获结果优先：browser-capture 注册在 redfox 之前
-  registry.register(browserCapture)
-  registry.register(createRedfoxProvider({ apiKey: settings.redfoxApiKey }))
-  registry.register(createYtdlpProvider({ binDir: BIN_DIR, cookiesFile: settings.cookiesFile, proxy: settings.proxy }))
+  registry.register(createYtdlpProvider({
+    binDir: BIN_DIR,
+    cookiesFile: settings.cookiesFile,
+    proxy: settings.proxy,
+    retries: settings.retries,
+    fragmentConcurrency: settings.fragmentConcurrency,
+    customHeaders: settings.customHeaders
+  }))
   const resolutions = createResolutionService({ registry, assets })
   const store = createJobStore({ filePath: join(DATA_DIR, 'jobs.json') })
   const retry = createRetryPolicy({ maxAttempts: settings.maxAttempts ?? 3 })
@@ -75,7 +76,15 @@ export function composeApp({ settings = {} } = {}) {
 
   function applySettings(next) {
     scheduler.setConcurrency(next.concurrency || 2)
+    registry.replace('ytdlp', createYtdlpProvider({
+      binDir: BIN_DIR,
+      cookiesFile: next.cookiesFile,
+      proxy: next.proxy,
+      retries: next.retries,
+      fragmentConcurrency: next.fragmentConcurrency,
+      customHeaders: next.customHeaders
+    }))
   }
 
-  return { resolutions, assets, store, scheduler, deliveries, registry, browserCapture, applySettings }
+  return { resolutions, assets, store, scheduler, deliveries, registry, applySettings }
 }

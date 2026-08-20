@@ -1,15 +1,14 @@
 import express from 'express'
 import cors from 'cors'
-import { existsSync, statSync, readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, statSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { randomBytes, createHash, timingSafeEqual } from 'node:crypto'
-import { networkInterfaces } from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createApiV2Router } from './api-v2.js'
 import { composeApp } from './compose.js'
 import { createSettingsStore } from './core/settings.js'
+import { createRateLimiter } from './core/rate-limit.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -21,12 +20,9 @@ const BIN_DIR = join(ROOT, 'resources', 'bin')
 const DOWNLOADS_DIR = join(WEB_ROOT, 'downloads')
 const PUBLIC_DIR = join(WEB_ROOT, 'client', 'dist')
 const SUANLE_DIR = join(WEB_ROOT, 'suanle')
-const CONFIG_PATH = join(DATA_DIR, 'share-config.json')
-
 const PORT = Number(process.env.PORT || 8787)
 const HOST = process.env.HOST || '0.0.0.0'
-const TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 7
-const AUTH_REQUIRED = false
+const TRUST_PROXY = process.env.TRUST_PROXY === 'true'
 const WEB_VERSION = '0.3.1'
 
 // miaoCut remote brain. Self-host: MIAOCUT_BASE_URL=http://127.0.0.1:8000
@@ -36,18 +32,52 @@ const MIAOCUT_GATEWAY_SECRET = String(process.env.MIAOCUT_GATEWAY_SECRET || '').
 const MIAOCUT_TIMEOUT_MS = Number(process.env.MIAOCUT_TIMEOUT_MS || 120000)
 const MIAOCUT_MAX_UPLOAD = Number(process.env.MIAOCUT_MAX_UPLOAD || 12 * 1024 * 1024)
 const MIAOCUT_PROFILES = new Set(['sharp', 'fur'])
+const ADMIN_TOKEN = String(process.env.IKUN_ADMIN_TOKEN || '').trim()
+
+function positiveInteger(value, fallback) {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function publicSettings(settings) {
+  return {
+    concurrency: settings.concurrency,
+    fragmentConcurrency: settings.fragmentConcurrency,
+    maxAttempts: settings.maxAttempts,
+    retries: settings.retries,
+    autoCleanupEnabled: settings.autoCleanupEnabled,
+    retentionHours: settings.retentionHours,
+    maxDownloadSizeGB: settings.maxDownloadSizeGB,
+    historyLimit: settings.historyLimit
+  }
+}
+
+function isAdminRequest(req) {
+  return Boolean(ADMIN_TOKEN) && req.headers['x-admin-token'] === ADMIN_TOKEN
+}
+
+function requireAdmin(req, res, next) {
+  if (!ADMIN_TOKEN) return res.status(403).json({ error: '公网模式下已关闭网页设置写入，请通过服务器配置文件或环境变量管理', code: 'ADMIN_DISABLED' })
+  if (!isAdminRequest(req)) return res.status(403).json({ error: '管理令牌无效', code: 'ADMIN_REQUIRED' })
+  return next()
+}
 
 const app = express()
-app.use(cors())
+app.set('trust proxy', TRUST_PROXY ? 1 : false)
+app.disable('x-powered-by')
+app.use(cors({ origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map((item) => item.trim()).filter(Boolean) : true, methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'] }))
 app.use(express.json({ limit: '1mb' }))
 
 const settingsStore = createSettingsStore()
 
-// v2 直链垂直切片：compose.js 统一装配（解析 + 任务调度 + 资产交付）
-// 注意：compose 拿到的是 settings 快照；PUT /api/settings 后 applySettings 仅同步 concurrency，
-// maxAttempts/redfoxApiKey 等保持启动值（已知限制，重启后生效）。
+// compose.js 统一装配：yt-dlp 解析、任务调度与媒体交付。
+// 管理员通过受保护设置接口更新后，解析器网络参数与并发即时刷新。
 const composed = composeApp({ settings: settingsStore.get() })
-app.use('/api/v2', createApiV2Router({ ...composed, authRequired: AUTH_REQUIRED ? authRequired : null }))
+const resolveRateLimit = createRateLimiter({ windowMs: 60_000, max: positiveInteger(process.env.RESOLVE_RATE_LIMIT, 20), message: '解析请求过于频繁，请稍后再试' })
+const downloadRateLimit = createRateLimiter({ windowMs: 60_000, max: positiveInteger(process.env.DOWNLOAD_RATE_LIMIT, 10), message: '下载任务创建过于频繁，请稍后再试' })
+const aiRateLimit = createRateLimiter({ windowMs: 60_000, max: positiveInteger(process.env.AI_RATE_LIMIT, 5), message: 'AI 图片处理请求过于频繁，请稍后再试' })
+const assetRateLimit = createRateLimiter({ windowMs: 60_000, max: positiveInteger(process.env.ASSET_RATE_LIMIT, 60), message: '媒体访问过于频繁，请稍后再试' })
+app.use('/api/v2', createApiV2Router({ ...composed, rateLimits: { resolve: resolveRateLimit, download: downloadRateLimit, asset: assetRateLimit }, isAdmin: isAdminRequest }))
 
 // 重启恢复：RESOLVING/DOWNLOADING/PROCESSING 的中断任务置为 RETRY_WAIT，由用户手动重试
 const recovered = composed.store.recoverInterrupted()
@@ -73,146 +103,12 @@ function cleanupStalePyinstallerDirs() {
 
 cleanupStalePyinstallerDirs()
 
-function loadShareConfig() {
-  ensureDataDir()
-  const envPassword = String(process.env.IKUN_WEB_PASSWORD || '').trim()
-  if (existsSync(CONFIG_PATH)) {
-    try {
-      const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))
-      if (envPassword) {
-        raw.password = envPassword
-        writeFileSync(CONFIG_PATH, JSON.stringify(raw, null, 2), 'utf8')
-      }
-      return raw
-    } catch {
-      /* recreate below */
-    }
-  }
-  const password = envPassword || randomBytes(4).toString('hex')
-  const config = {
-    password,
-    createdAt: Date.now(),
-    note: '访问密码。可用环境变量 IKUN_WEB_PASSWORD 覆盖。'
-  }
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8')
-  return config
-}
-
-const shareConfig = loadShareConfig()
-const sessions = new Map()
-
-function hashToken(token) {
-  return createHash('sha256').update(token).digest('hex')
-}
-
-function safeEqual(a, b) {
-  const left = Buffer.from(String(a))
-  const right = Buffer.from(String(b))
-  if (left.length !== right.length) return false
-  return timingSafeEqual(left, right)
-}
-
-function createSession() {
-  const token = randomBytes(24).toString('hex')
-  const session = {
-    tokenHash: hashToken(token),
-    createdAt: Date.now(),
-    expiresAt: Date.now() + TOKEN_TTL_MS
-  }
-  sessions.set(session.tokenHash, session)
-  return token
-}
-
-function getBearerToken(req) {
-  const header = req.headers.authorization || ''
-  if (header.startsWith('Bearer ')) return header.slice(7).trim()
-  if (req.query?.token) return String(req.query.token)
-  if (req.headers['x-access-token']) return String(req.headers['x-access-token'])
-  return ''
-}
-
-function getClientId(req) {
-  const raw = String(req.headers['x-client-id'] || req.query?.clientId || '').trim()
-  if (raw && /^[a-zA-Z0-9_-]{8,80}$/.test(raw)) return raw
-  return 'anonymous'
-}
-
-function authRequired(req, res, next) {
-  if (!AUTH_REQUIRED) {
-    req.clientId = getClientId(req)
-    return next()
-  }
-  const token = getBearerToken(req)
-  if (!token) {
-    return res.status(401).json({ error: '需要访问密码', code: 'AUTH_REQUIRED' })
-  }
-  const session = sessions.get(hashToken(token))
-  if (!session || session.expiresAt < Date.now()) {
-    if (session) sessions.delete(hashToken(token))
-    return res.status(401).json({ error: '登录已过期，请重新输入访问密码', code: 'AUTH_EXPIRED' })
-  }
-  req.accessToken = token
-  req.clientId = getClientId(req)
-  next()
-}
-
-function getLanAddresses() {
-  const nets = networkInterfaces()
-  const result = []
-  for (const entries of Object.values(nets)) {
-    for (const net of entries || []) {
-      if (net.family === 'IPv4' && !net.internal) result.push(net.address)
-    }
-  }
-  return result
-}
 
 app.get('/api/health', (_req, res) => {
-  res.json({
-    ok: true,
-    name: 'iKun Web',
-    version: WEB_VERSION,
-    shareable: true,
-    authRequired: AUTH_REQUIRED
-  })
+  res.json({ ok: true, name: 'iKun Web', version: WEB_VERSION, public: true })
 })
 
-app.get('/api/share-info', (_req, res) => {
-  const lan = getLanAddresses()
-  res.json({
-    port: PORT,
-    host: HOST,
-    version: WEB_VERSION,
-    localUrl: `http://127.0.0.1:${PORT}`,
-    lanUrls: lan.map((ip) => `http://${ip}:${PORT}`),
-    authRequired: AUTH_REQUIRED,
-    passwordHint: AUTH_REQUIRED && shareConfig.password ? `${shareConfig.password.slice(0, 2)}****` : '',
-    hasFrontend: existsSync(join(PUBLIC_DIR, 'index.html'))
-  })
-})
-
-app.post('/api/login', (req, res) => {
-  const password = String(req.body?.password || '').trim()
-  if (!password || !safeEqual(password, shareConfig.password)) {
-    return res.status(401).json({ error: '访问密码错误' })
-  }
-  const token = createSession()
-  res.json({
-    token,
-    expiresIn: TOKEN_TTL_MS,
-    message: '登录成功'
-  })
-})
-
-app.get('/api/me', authRequired, (req, res) => {
-  res.json({
-    ok: true,
-    clientId: req.clientId,
-    expiresIn: TOKEN_TTL_MS
-  })
-})
-
-app.get('/api/binaries', authRequired, async (_req, res) => {
+app.get('/api/binaries', async (_req, res) => {
   const ytdlpPath = join(BIN_DIR, 'yt-dlp.exe')
   const ffmpegPath = join(BIN_DIR, 'ffmpeg.exe')
   let ytdlpOk = false
@@ -234,11 +130,11 @@ app.get('/api/binaries', authRequired, async (_req, res) => {
   res.json({ ytdlp: ytdlpPath, ytdlpOk, version, ffmpeg: ffmpegPath, ffmpegOk })
 })
 
-app.get('/api/settings', authRequired, (_req, res) => {
-  res.json(settingsStore.get())
+app.get('/api/settings', (_req, res) => {
+  res.json(publicSettings(settingsStore.get()))
 })
 
-app.put('/api/settings', authRequired, (req, res) => {
+app.put('/api/settings', requireAdmin, (req, res) => {
   try {
     const settings = settingsStore.set(req.body || {})
     composed.applySettings?.(settings)
@@ -295,7 +191,7 @@ function parseMiaocutError(status, body) {
   return text.slice(0, 200) || `上游错误（${status}）`
 }
 
-app.get('/api/ai/status', authRequired, async (_req, res) => {
+app.get('/api/ai/status', async (_req, res) => {
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 8000)
@@ -328,7 +224,7 @@ app.get('/api/ai/status', authRequired, async (_req, res) => {
 })
 
 // 壳 + 远程脑：浏览器 → iKun /api/ai/* → miaoCut
-app.post('/api/ai/remove-background', authRequired, async (req, res) => {
+app.post('/api/ai/remove-background', aiRateLimit, async (req, res) => {
   try {
     const profileRaw = String(req.query.profile || 'sharp').toLowerCase()
     const profile = MIAOCUT_PROFILES.has(profileRaw) ? profileRaw : 'sharp'
@@ -486,13 +382,12 @@ function enforceDownloadCapacity() {
 }
 
 // 存储统计：下载目录用量 + 历史记录条数（供前端提示展示）
-app.get('/api/downloads/stats', authRequired, (req, res) => {
+app.get('/api/downloads/stats', (_req, res) => {
   const settings = settingsStore.get()
   const usedBytes = dirSize(DOWNLOADS_DIR)
   const maxBytes = (settings.maxDownloadSizeGB || 5) * 1024 * 1024 * 1024
   const terminal = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED', 'READY', 'DELIVERED'])
-  const myJobs = composed.store.list(req.clientId)
-  const historyCount = myJobs.filter((j) => terminal.has(j.status)).length
+  const historyCount = composed.store.all().filter((j) => terminal.has(j.status)).length
   res.json({
     usedBytes,
     maxBytes,
@@ -562,28 +457,20 @@ function scheduleCleanup() {
 }
 
 app.listen(PORT, HOST, () => {
-  const lan = getLanAddresses()
   const settings = settingsStore.get()
   console.log('')
   console.log('========================================')
-  console.log('  iKun 可分享网页端已启动')
+  console.log('  iKun 公网网页端已启动（无登录）')
   console.log('========================================')
-  console.log(`  本机访问:  http://127.0.0.1:${PORT}`)
-  for (const ip of lan) {
-    console.log(`  局域网:    http://${ip}:${PORT}`)
-  }
-  console.log(`  访问密码:  ${shareConfig.password}`)
+  console.log(`  监听地址:  http://${HOST}:${PORT}`)
+  console.log(`  反向代理:  TRUST_PROXY=${TRUST_PROXY}`)
   console.log(`  下载目录:  ${DOWNLOADS_DIR}`)
   console.log(`  前端资源:  ${existsSync(join(PUBLIC_DIR, 'index.html')) ? '已加载' : '未构建（仅 API）'}`)
   console.log(`  AI 抠图:   ${MIAOCUT_BASE_URL}${isRemoteMiaocut() ? '（远程）' : '（自定义）'}`)
-  console.log(
-    `  自动清理:  ${settings.autoCleanupEnabled ? `开启（保留 ${settings.retentionHours} 小时）` : '关闭'}`
-  )
-  console.log(
-    `  容量上限:  ${settings.maxDownloadSizeGB || 5} GB（当前 ${formatBytes(dirSize(DOWNLOADS_DIR))}，超出自动删最旧）`
-  )
+  console.log(`  自动清理:  ${settings.autoCleanupEnabled ? `开启（保留 ${settings.retentionHours} 小时）` : '关闭'}`)
+  console.log(`  容量上限:  ${settings.maxDownloadSizeGB || 5} GB（当前 ${formatBytes(dirSize(DOWNLOADS_DIR))}，超出自动删最旧）`)
   console.log(`  历史记录:  最多保留 ${settings.historyLimit || 30} 条终态记录`)
-  console.log('  把局域网地址 + 密码发给朋友即可使用')
+  console.log('  公网限流:  解析 20/min，下载任务 10/min，AI 抠图 5/min，媒体访问 60/min（均可用环境变量调整）')
   console.log('========================================')
   console.log('')
 

@@ -1,100 +1,188 @@
-# iKun 可分享网页端
+# iKun 公网下载站
 
-基于桌面版能力拆出的 **电脑 / 手机自适应** Web 版，支持 **一个链接 + 访问密码** 分享给朋友使用。
+基于 Vue 3、Express、yt-dlp 和 FFmpeg 的公网视频下载站。用户打开正式域名即可使用，无登录页、无局域网分享逻辑，也不依赖 Redfox 或浏览器捕获；解析、下载和处理统一在服务端通过 yt-dlp 完成。
 
-- 前端：Vue 3 + Pinia + Vite（响应式布局）
-- 后端：Express + 本地 `yt-dlp` / FFmpeg（复用项目 `resources/bin`）
-- 分享：单端口托管 API + 前端、访问密码、按设备隔离任务
+- 前端：Vue 3 + Pinia + Vite
+- 服务端：Express + 本地 `yt-dlp` / FFmpeg
+- 下载能力：直链、视频音频合并、仅音频、HLS、图片集
+- 运行保护：按 IP 限流、匿名任务控制令牌、自动过期清理、容量上限保护
 
-> 说明：浏览器本身不能运行 yt-dlp，因此网页端必须在你的电脑（或服务器）上启动服务。解析与下载由服务端完成；单文件直链不落服务器磁盘，其余动作（合并 / 音频 / HLS / 图片集）产物按任务目录落到主机 `web/downloads/<jobId>`，再通过浏览器「下载到本机」。
+> 浏览器无法直接运行 yt-dlp。网页只发起请求；解析、下载与转码都在服务器进行。合并、音频、HLS、图片集等产物会写入 `web/downloads/<jobId>/`，再由浏览器下载。
 
 ## 目录
 
 ```text
 web/
-├─ client/      # 网页前端
-├─ server/      # API + 静态资源托管
-├─ downloads/   # 下载输出目录（自动创建）
-└─ data/        # share-config.json 等（自动创建）
+├─ client/       # Vue 前端
+├─ server/       # Express API 与静态托管
+├─ data/         # settings.json、jobs.json（自动创建）
+├─ downloads/    # 服务端下载产物（自动创建）
+└─ suanle/       # 命理工具静态产物（可选）
 ```
 
-## 推荐：一键分享模式（单端口）
+## 本地开发与构建
 
-适合把链接发给同一 Wi-Fi 下的朋友。
+首次安装依赖：
 
-### 1. 安装依赖（首次）
-
-```powershell
+```bash
 npm run web:install
 ```
 
-### 2. 构建并启动
+开发模式使用两个终端：
 
-```powershell
-npm run web:share
+```bash
+# 终端 1：API
+npm run web:server
+
+# 终端 2：前端热更新
+npm run web:client
 ```
 
-或分步：
+生产构建与启动：
 
-```powershell
+```bash
 npm run web:build
 npm run web:start
 ```
 
-终端会打印类似信息：
+默认 API 监听 `0.0.0.0:8787`。构建成功后，Express 会托管 `web/client/dist/`。
 
-```text
-本机访问:  http://127.0.0.1:8787
-局域网:    http://192.168.x.x:8787
-访问密码:  ab12cd34
+## 功能与运行模型
+
+- **yt-dlp 单通道解析**：Redfox 和浏览器捕获已从 Web 运行链路移除。
+- **解析与交付**：`POST /api/v2/resolutions` 返回媒体动作；直链可直接交付，合并、音频、HLS、图片集进入任务队列。
+- **匿名任务隔离**：创建任务时服务端签发随机控制令牌，浏览器仅保存自己的令牌；其他匿名用户看不到、取消不了、重试不了、下载不了该任务。没有账户体系，也不需要登录。
+- **任务状态**：`RESOLVING → QUEUED → DOWNLOADING → PROCESSING → COMPLETED`。失败任务会进入 `RETRY_WAIT`，可由原浏览器重试。
+- **自动清理**：默认保留 24 小时；服务启动时与之后每 30 分钟清理过期任务和文件。
+- **容量保护**：下载目录超过上限时，自动优先清理最旧且非运行中的任务目录，直至回落至容量上限的 90%。
+- **AI 抠图与命理工具**：保留为独立功能模块，均受公网限流保护。
+
+## 公网部署（宝塔 / Nginx）
+
+推荐结构：Nginx/宝塔负责 HTTPS 与域名，Node 服务只监听本机端口，Nginx 反向代理到 `127.0.0.1:8787`。
+
+### 1. 准备运行环境
+
+服务器需准备：
+
+- Node.js 22 或更高版本
+- `resources/bin/yt-dlp.exe` 与 `resources/bin/ffmpeg.exe`（Linux 服务器需替换为可执行的 Linux 二进制，并在 `compose.js` 中按平台确认路径）
+- 已构建的前端：`npm run web:build`
+- 进程守护：宝塔 Node 项目管理器、PM2 或 systemd 三选一
+
+### 2. 生产环境变量
+
+在 Node 项目管理器、PM2 配置或 systemd 中设置：
+
+```bash
+NODE_ENV=production
+HOST=127.0.0.1
+PORT=8787
+TRUST_PROXY=true
+CORS_ORIGIN=https://下载站.你的域名
+IKUN_ADMIN_TOKEN=请换成一条足够长的随机字符串
 ```
 
-### 3. 分享给朋友
+说明：
 
-1. 把 **局域网地址** + **访问密码** 发给同一 Wi-Fi 的朋友
-2. 朋友用手机/电脑浏览器打开链接
-3. 输入密码后即可解析下载
-4. 各自任务按设备隔离，互不影响
+- `TRUST_PROXY=true`：使限流使用 Nginx 转发的真实客户端 IP；仅在服务只允许可信反向代理访问时启用。
+- `CORS_ORIGIN`：正式域名白名单。多个域名用英文逗号分隔，例如 `https://a.example.com,https://b.example.com`。
+- `IKUN_ADMIN_TOKEN`：仅服务器管理员使用。网页公开访客不能读取或改写 Cookie、代理、请求头等敏感下载配置。
+- 如果未设置 `IKUN_ADMIN_TOKEN`，`PUT /api/settings` 会被关闭；仍可直接编辑服务器上的 `web/data/settings.json` 后重启服务。
 
-### 自定义密码 / 端口
+### 3. Nginx 反向代理示例
 
-```powershell
-# Windows PowerShell
-$env:IKUN_WEB_PASSWORD="你的密码"
-$env:PORT="8787"
+将 `下载站.你的域名` 替换为实际域名：
+
+```nginx
+server {
+    listen 80;
+    server_name 下载站.你的域名;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name 下载站.你的域名;
+
+    ssl_certificate     /path/to/fullchain.pem;
+    ssl_certificate_key /path/to/privkey.pem;
+
+    client_max_body_size 16m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /api/v2/downloads/ {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+}
+```
+
+宝塔中可在「网站 → 目标站点 → 反向代理」中填入 `http://127.0.0.1:8787`，并在配置文件补充以上转发头、上传限制和下载超时配置。
+
+### 4. 启动与检查
+
+```bash
+npm run web:build
 npm run web:start
 ```
 
-也可直接编辑 `web/data/share-config.json` 里的 `password` 字段。
+检查：
 
-## 开发模式（双进程热更新）
-
-```powershell
-# 终端 1
-npm run web:server
-
-# 终端 2
-npm run web:client
+```bash
+curl http://127.0.0.1:8787/api/health
+curl -I https://下载站.你的域名/
 ```
 
-- 前端：`http://127.0.0.1:5173`（Vite 代理 `/api`）
-- API：`http://127.0.0.1:8787`
+健康检查应返回：
 
-## 功能
+```json
+{"ok":true,"name":"iKun Web","version":"0.3.1","public":true}
+```
 
-- 访问密码登录（Bearer Token，约 7 天有效）
-- 解析下载（v2）：解析返回媒体动作列表——直链 / 合并 / 仅音频 / HLS / 图片集，一键选择
-- 直链优先：单文件直链不落服务器磁盘（302 跳转或流式代理），合并 / 音频 / HLS / 图片集走任务队列
-- 下载队列：任务状态机（RESOLVING → DOWNLOADING → PROCESSING → COMPLETED / FAILED），失败自动进入 RETRY_WAIT 并按最大重试次数自动重试；可手动取消 / 重试
-- 批量导入：文本识别多链接，逐个解析并入队
-- 历史记录（按设备隔离）
-- 分享页：复制链接 / 系统分享
-- 设置：并发、分片并发、最大重试次数、直链优先开关、代理、Cookies 路径、请求头、字幕/元数据/缩略图、Redfox 去水印 API Key
-- 命理工具：导航栏「命理」页内嵌算了么（suanle-me）静态产物（`/suanle/`），紫微/八字/梅花易数等本地计算
+## 公网防护与限流
+
+内置按 IP 的内存限流，默认阈值：
+
+| 请求类型 | 默认限制 | 环境变量 |
+| --- | ---: | --- |
+| 链接解析 | 20 次/分钟 | `RESOLVE_RATE_LIMIT` |
+| 创建下载任务 | 10 次/分钟 | `DOWNLOAD_RATE_LIMIT` |
+| AI 抠图 | 5 次/分钟 | `AI_RATE_LIMIT` |
+| 媒体内容/代理 | 60 次/分钟 | `ASSET_RATE_LIMIT` |
+
+超限返回 HTTP `429`，并含 `Retry-After` 与 `RateLimit-*` 响应头。当前限流存储在服务进程内存中；若横向扩容为多个 Node 实例，请改为 Redis 等共享限流存储。
+
+不要把 Node 的 `8787` 端口直接暴露到公网。防火墙只开放 Nginx 的 80/443，并让 Node 绑定 `127.0.0.1`。
+
+## yt-dlp 维护建议
+
+部分平台会频繁调整反爬策略，建议定期更新 yt-dlp，并只在服务器端维护以下敏感设置：
+
+- `cookiesFile`：Netscape 格式 Cookie 文件的服务器绝对路径
+- `proxy`：必要时使用的代理地址
+- `customHeaders`：每行一个 `Header: value`
+- `retries`、`fragmentConcurrency`：网络重试与分片并发
+
+这些字段会传给 yt-dlp 的 `--cookies`、`--proxy`、`--add-header`、`--retries`、`--fragment-retries` 与 `--concurrent-fragments` 参数。Cookie、代理和管理员令牌均不得写入前端代码、仓库或公开截图。
 
 ## 命理工具（suanle-me 集成）
 
-源码在 `../suanle-me`（独立仓库，`output: export` + `basePath: /suanle`）。更新集成版：
+源码位于 `../suanle-me`。更新静态产物：
 
 ```powershell
 npm --prefix ../suanle-me install
@@ -102,54 +190,11 @@ npm --prefix ../suanle-me run build
 Copy-Item -LiteralPath ../suanle-me/out -Destination ./suanle -Recurse -Force
 ```
 
-`web/suanle/` 为构建产物（已 gitignore），Express 在 SPA 兜底前挂载 `/suanle`。
+`web/suanle/` 是构建产物；Express 会在 SPA 回退前挂载 `/suanle`。
 
-## 解析与下载（v2 架构）
+## 注意事项
 
-- 解析（`POST /api/v2/resolutions`）返回标题、缩略图、媒体资产与**媒体动作**列表：直链（direct）/ 合并（merge）/ 仅音频（extract-audio）/ HLS / 图片集（images-zip）
-- 直链动作不落服务器磁盘：单文件以 302 跳转或流式代理交付
-- 合并 / 音频 / HLS / 图片集动作进入任务队列（`POST /api/v2/downloads`），产物保存在 `web/downloads/<jobId>/`，资产地址 24 小时内有效（`/api/v2/assets/:id/content`）
-- 任务状态：`RESOLVING → QUEUED → DOWNLOADING → PROCESSING → COMPLETED`；失败自动转 `RETRY_WAIT` 按最大重试次数自动重试，超限置为 `FAILED`，可手动重试
-
-## 浏览器捕获上报（可选）
-
-`POST /api/v2/capture/report` 用于扩展浏览器扩展 / 采集端上报解析结果。需配置环境变量 `IKUN_CAPTURE_SECRET`，且请求头携带 `X-Capture-Secret` 匹配；**未配置则上报端点禁用**（返回 401）。
-
-## 自动清理
-
-网页端默认开启自动清理（小硬盘服务器推荐）：
-
-- 默认保留 **24 小时**
-- 每 **30 分钟** 扫描一次 `web/downloads/`，删除超过保留时长的任务目录（含旧版散落文件），并同步清理 `web/data/jobs.json` 中超过保留时长的已结束任务记录
-- 可在「设置 → 自动清理」修改保留时长
-
-也可通过环境变量/设置接口调整：`autoCleanupEnabled`、`retentionHours`。
-
-## Cloudflare（小黄云）绑定域名
-
-推荐用 **Cloudflare Tunnel**，不用在防火墙开 8787，还能免费 HTTPS。
-
-1. 域名 NS 指到 Cloudflare
-2. Zero Trust → Networks → Tunnels → Create a tunnel（cloudflared）
-3. Public Hostname：
-   - Subdomain：如 `dl`
-   - Domain：你的域名
-   - Service：`http://127.0.0.1:8787`
-4. 复制安装 token，在服务器执行：
-
-```bash
-export CF_TUNNEL_TOKEN='你的token'
-bash /opt/ikun-web/scripts/setup-cloudflare-tunnel.sh
-# 或把仓库 scripts/setup-cloudflare-tunnel.sh 拷到服务器后执行
-```
-
-完成后访问：`https://dl.你的域名`，再输入网页访问密码。
-
-> 注意：Tunnel 只负责域名/HTTPS；下载仍走服务器磁盘与带宽。
-
-## 注意
-
-1. 需先准备好 `resources/bin/yt-dlp.exe` 与 `ffmpeg.exe`（可用根目录 `npm run fetch:ytdlp`）。
-2. 部分站点（如抖音）需要 Cookies，请在设置中填写服务器可访问的 `cookies.txt` 路径。
-3. 合并 / 音频等需落盘的产物先存到主机 `web/downloads/<jobId>`，再通过「下载到本机」传到浏览器所在设备；单文件直链不占用服务器磁盘。
-4. 分享模式依赖主机保持开机联网；关掉服务后朋友无法访问。
+1. 请仅处理你拥有权利下载、保存或再利用的内容，并遵守目标平台规则与适用法律。
+2. 任务控制令牌保存在访问者浏览器本地存储中。清理浏览器站点数据或换设备后，旧任务不再可见；这是无登录模式下的隐私保护取舍。
+3. 下载产物会按保留时长和容量策略自动清理，请及时保存。
+4. 真实平台解析可能需要更新 yt-dlp、更新 Cookie 或调整网络配置；单元测试通过不代表每个平台都无需 Cookie。

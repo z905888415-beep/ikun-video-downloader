@@ -6,7 +6,6 @@ import {
   type AppSettings,
   type BinaryStatus,
   type DownloadStats,
-  type ShareInfo,
   type V2Job,
   type V2Resolution
 } from '../api/client'
@@ -21,7 +20,7 @@ export const useAppStore = defineStore('app', () => {
   const page = ref<PageId>('home')
   const settings = ref<AppSettings | null>(null)
   const binary = ref<BinaryStatus | null>(null)
-  const shareInfo = ref<ShareInfo | null>(null)
+  const version = ref('')
   const url = ref('')
   const v2Resolution = ref<V2Resolution | null>(null)
   const v2Probing = ref(false)
@@ -29,8 +28,6 @@ export const useAppStore = defineStore('app', () => {
   const v2Jobs = ref<V2Job[]>([])
   const downloadStats = ref<DownloadStats | null>(null)
   const apiOnline = ref(false)
-  const authed = ref(true)
-  const authChecking = ref(true)
   const globalError = ref('')
   const notice = ref('')
   const urlError = ref('')
@@ -45,24 +42,18 @@ export const useAppStore = defineStore('app', () => {
       ).length
   )
 
-  const version = computed(() => shareInfo.value?.version || '')
-
   async function init(): Promise<void> {
-    // 打开即享：无登录门槛，直接加载数据
-    authChecking.value = true
-    authed.value = true
     try {
-      shareInfo.value = await api.shareInfo()
+      const health = await api.health()
+      version.value = health.version || ''
       apiOnline.value = true
       await loadAppData()
     } catch (e) {
       apiOnline.value = false
-      globalError.value = '无法连接服务，请确认网页端已启动'
-      if (e instanceof Error && e.message !== '无法连接服务，请确认网页端已启动') {
+      globalError.value = '无法连接服务，请确认网站服务已启动'
+      if (e instanceof Error && e.message !== '无法连接服务，请确认网站服务已启动') {
         globalError.value = errorMessage(e) || globalError.value
       }
-    } finally {
-      authChecking.value = false
     }
   }
 
@@ -199,10 +190,6 @@ export const useAppStore = defineStore('app', () => {
     }, 3200)
   }
 
-  async function saveSettings(partial: Partial<AppSettings>): Promise<void> {
-    settings.value = await api.setSettings(partial)
-  }
-
   async function refreshBinary(): Promise<void> {
     binary.value = await api.binaries()
   }
@@ -223,7 +210,6 @@ export const useAppStore = defineStore('app', () => {
     page,
     settings,
     binary,
-    shareInfo,
     version,
     url,
     v2Resolution,
@@ -232,8 +218,6 @@ export const useAppStore = defineStore('app', () => {
     v2Jobs,
     downloadStats,
     apiOnline,
-    authed,
-    authChecking,
     globalError,
     notice,
     urlError,
@@ -248,7 +232,6 @@ export const useAppStore = defineStore('app', () => {
     retryV2Job,
     refreshV2Jobs,
     refreshDownloadStats,
-    saveSettings,
     refreshBinary,
     pasteFromClipboard
   }

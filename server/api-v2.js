@@ -13,16 +13,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const STATUS_MAP = {
   VALIDATION_ERROR: 422,
   URL_UNSUPPORTED: 422,
-  AUTH_REQUIRED: 401,
   JOB_NOT_FOUND: 422,
   RATE_LIMITED: 429,
   RESOLUTION_EXPIRED: 422,
   ASSET_EXPIRED: 422
 }
 
-export function createApiV2Router({ resolutions, assets, deliveries, scheduler, store, authRequired = null, browserCapture = null }) {
+export function createApiV2Router({ resolutions, assets, deliveries, scheduler, store, rateLimits = {}, isAdmin = () => false }) {
   const router = Router()
-  const requireAuth = authRequired || ((_req, _res, next) => next())
+  const resolveRateLimit = rateLimits.resolve || ((_req, _res, next) => next())
+  const downloadRateLimit = rateLimits.download || ((_req, _res, next) => next())
+  const assetRateLimit = rateLimits.asset || ((_req, _res, next) => next())
 
   function requestId() {
     return `req_${randomUUID().slice(0, 12)}`
@@ -37,7 +38,35 @@ export function createApiV2Router({ resolutions, assets, deliveries, scheduler, 
     res.status(status).json(toErrorResponse(error, requestId()))
   }
 
-  router.post('/resolutions', requireAuth, async (req, res) => {
+  function jobToken(req) {
+    return String(req.headers['x-job-token'] || req.query?.token || '').trim()
+  }
+
+  function jobTokens(req) {
+    return String(req.headers['x-job-tokens'] || '')
+      .split(',')
+      .map((token) => token.trim())
+      .filter(Boolean)
+      .slice(0, 200)
+  }
+
+  function canAccessJob(req, job) {
+    return Boolean(job) && (isAdmin(req) || (Boolean(job.controlToken) && jobToken(req) === job.controlToken))
+  }
+
+  function requireJobAccess(req, res, job) {
+    if (canAccessJob(req, job)) return true
+    fail(res, new AppError('JOB_NOT_FOUND', '任务不存在或已过期', false))
+    return false
+  }
+
+  function publicJob(job) {
+    if (!job) return job
+    const { controlToken, clientId, ...safeJob } = job
+    return safeJob
+  }
+
+  router.post('/resolutions', resolveRateLimit, async (req, res) => {
     try {
       const url = String(req.body?.url || '').trim()
       if (!url) throw new AppError('VALIDATION_ERROR', '请提供链接', false)
@@ -48,25 +77,7 @@ export function createApiV2Router({ resolutions, assets, deliveries, scheduler, 
     }
   })
 
-  router.post('/capture/report', (req, res) => {
-    if (!browserCapture) {
-      return fail(res, new AppError('URL_UNSUPPORTED', '捕获上报未启用', false))
-    }
-    const secret = String(process.env.IKUN_CAPTURE_SECRET || '')
-    if (!secret || req.headers['x-capture-secret'] !== secret) {
-      return fail(res, new AppError('AUTH_REQUIRED', '捕获上报未授权', false))
-    }
-    const { sourceUrl, mediaUrl, title, referer, userAgent, cookie } = req.body || {}
-    if (!sourceUrl || !mediaUrl) return fail(res, new AppError('VALIDATION_ERROR', '缺少 sourceUrl 或 mediaUrl', false))
-    try {
-      browserCapture.report({ sourceUrl, mediaUrl, title, referer, userAgent, cookie })
-    } catch (error) {
-      return fail(res, new AppError('VALIDATION_ERROR', `上报失败：${error.message}`, false))
-    }
-    ok(res, { ok: true }, 201)
-  })
-
-  router.get('/resolutions/:id', requireAuth, (req, res) => {
+  router.get('/resolutions/:id', (req, res) => {
     const resolution = resolutions.getCached(req.params.id)
     if (!resolution) {
       return fail(res, new AppError('RESOLUTION_EXPIRED', '解析结果已过期，请重新解析', true))
@@ -111,8 +122,10 @@ export function createApiV2Router({ resolutions, assets, deliveries, scheduler, 
     }
   })
 
-  router.get('/assets/:id/content', async (req, res) => {
+  router.get('/assets/:id/content', assetRateLimit, async (req, res) => {
     const assetId = req.params.id
+    const job = store.load(assetId)
+    if (job && !requireJobAccess(req, res, job)) return
     const entry = assets.get(assetId)
     if (!entry) {
       return fail(res, new AppError('ASSET_EXPIRED', '媒体地址已过期或不存在', true))
@@ -165,8 +178,10 @@ export function createApiV2Router({ resolutions, assets, deliveries, scheduler, 
     res.redirect(result.location)
   })
 
-  router.get('/assets/:id/proxy', async (req, res) => {
+  router.get('/assets/:id/proxy', assetRateLimit, async (req, res) => {
     const assetId = req.params.id
+    const job = store.load(assetId)
+    if (job && !requireJobAccess(req, res, job)) return
     const entry = assets.get(assetId)
     if (!entry) {
       return fail(res, new AppError('ASSET_EXPIRED', '媒体地址已过期或不存在', true))
@@ -186,10 +201,11 @@ export function createApiV2Router({ resolutions, assets, deliveries, scheduler, 
     return stream.pipe(res)
   })
 
-  router.post('/downloads', async (req, res) => {
+  router.post('/downloads', downloadRateLimit, async (req, res) => {
     try {
       const { resolutionId, actionId, mode = 'auto' } = req.body || {}
       const clientId = String(req.headers['x-client-id'] || 'anonymous')
+      const controlToken = randomUUID()
       if (!resolutionId || !actionId) {
         throw new AppError('VALIDATION_ERROR', '缺少 resolutionId 或 actionId', false)
       }
@@ -201,7 +217,7 @@ export function createApiV2Router({ resolutions, assets, deliveries, scheduler, 
       if (!action) throw new AppError('VALIDATION_ERROR', '动作不存在', false)
 
       const { createJob } = await import('./core/contracts.js')
-      const job = createJob({ clientId, resolutionId, sourceUrl: resolution.sourceUrl, actionId, mode })
+      const job = createJob({ clientId, controlToken, resolutionId, sourceUrl: resolution.sourceUrl, actionId, mode })
       job.actionType = action.type
       job.requiresProcessing = action.requiresProcessing
       job.preferredExt = action.preferredExt
@@ -218,33 +234,31 @@ export function createApiV2Router({ resolutions, assets, deliveries, scheduler, 
       if (!action.requiresProcessing && mode !== 'server' && mode !== 'merge') {
         // 直链：直接交付，不入队；前端直接使用 action 的 assetId 下载
         store.update(job.id, { status: 'READY' })
-        return ok(res, store.load(job.id), 201)
+        res.setHeader('X-Job-Token', controlToken)
+        return ok(res, publicJob(store.load(job.id)), 201)
       }
       scheduler.schedule(store.load(job.id))
-      ok(res, store.load(job.id), 201)
+      res.setHeader('X-Job-Token', controlToken)
+      ok(res, publicJob(store.load(job.id)), 201)
     } catch (error) {
       fail(res, error)
     }
   })
 
   router.get('/downloads', (req, res) => {
-    ok(res, store.list(String(req.headers['x-client-id'] || 'anonymous')))
+    const jobs = isAdmin(req) ? store.all() : store.listByControlTokens(jobTokens(req))
+    ok(res, jobs.map(publicJob))
   })
 
   router.get('/downloads/:id', (req, res) => {
     const job = store.load(req.params.id)
-    if (!job || (job.clientId && job.clientId !== String(req.headers['x-client-id'] || ''))) {
-      return fail(res, new AppError('JOB_NOT_FOUND', '任务不存在', false))
-    }
-    ok(res, job)
+    if (!requireJobAccess(req, res, job)) return
+    ok(res, publicJob(job))
   })
 
   router.get('/downloads/:id/events', (req, res) => {
     const job = store.load(req.params.id)
-    const clientId = String(req.headers['x-client-id'] || '')
-    if (!job || (job.clientId && job.clientId !== clientId)) {
-      return fail(res, new AppError('JOB_NOT_FOUND', '任务不存在', false))
-    }
+    if (!requireJobAccess(req, res, job)) return
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache')
     res.setHeader('X-Accel-Buffering', 'no')
@@ -270,22 +284,16 @@ export function createApiV2Router({ resolutions, assets, deliveries, scheduler, 
   })
 
   router.post('/downloads/:id/retry', (req, res) => {
-    const clientId = String(req.headers['x-client-id'] || '')
     const job = store.load(req.params.id)
-    if (!job || (job.clientId && job.clientId !== clientId)) {
-      return fail(res, new AppError('JOB_NOT_FOUND', '任务不存在', false))
-    }
+    if (!requireJobAccess(req, res, job)) return
     const updated = scheduler.retry(req.params.id)
     if (!updated) return fail(res, new AppError('VALIDATION_ERROR', '当前状态不可重试', false))
-    ok(res, updated)
+    ok(res, publicJob(updated))
   })
 
   router.delete('/downloads/:id', (req, res) => {
-    const clientId = String(req.headers['x-client-id'] || '')
     const job = store.load(req.params.id)
-    if (!job || (job.clientId && job.clientId !== clientId)) {
-      return fail(res, new AppError('JOB_NOT_FOUND', '任务不存在', false))
-    }
+    if (!requireJobAccess(req, res, job)) return
     scheduler.cancel(req.params.id)
     ok(res, { ok: true })
   })
