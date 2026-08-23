@@ -12,6 +12,35 @@ import {
 
 export type PageId = 'home' | 'queue' | 'tools' | 'suanle' | 'history' | 'settings'
 
+export function extractUrl(value: string): string {
+  if (!value) return ''
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+
+  // 1. 优先匹配 http:// 或 https:// 开头的 URL
+  const httpMatch = trimmed.match(/https?:\/\/[^\s\u4e00-\u9fa5<>'"()[\]{}]+/i)
+  if (httpMatch) {
+    let candidate = httpMatch[0]
+    candidate = candidate.replace(/[.,;!?:'"`\u3002\uff0c\uff01\uff1f\uff1b\uff1a\u201c\u201d\u2018\u2019\u3010\u3011\uff08\uff09\u3008\u3009\u300a\u300b]+$/, '')
+    return candidate
+  }
+
+  // 2. 如果包含其它明确协议头（如 ftp:// 等），原样返回
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//i.test(trimmed)) {
+    return trimmed
+  }
+
+  // 3. 匹配没有写协议前缀的常见短链或域名
+  const domainMatch = trimmed.match(/(?:[a-zA-Z0-9-]+\.)+(?:com|tv|cn|net|org|cc|me|app|be|link|site|top|xyz|co|io)\/[^\s\u4e00-\u9fa5<>'"()[\]{}]*/i)
+  if (domainMatch) {
+    let candidate = domainMatch[0]
+    candidate = candidate.replace(/[.,;!?:'"`\u3002\uff0c\uff01\uff1f\uff1b\uff1a\u201c\u201d\u2018\u2019\u3010\u3011\uff08\uff09\u3008\u3009\u300a\u300b]+$/, '')
+    return `https://${candidate}`
+  }
+
+  return trimmed
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -64,8 +93,13 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function doResolveV2(targetUrl?: string): Promise<void> {
-    const u = (targetUrl ?? url.value).trim()
-    if (!u) { v2Error.value = '请输入视频链接'; return }
+    const raw = (targetUrl ?? url.value).trim()
+    if (!raw) { v2Error.value = '请输入视频链接'; return }
+    const cleaned = extractUrl(raw)
+    if (cleaned && cleaned !== url.value) {
+      url.value = cleaned
+    }
+    const u = cleaned || raw
     probeController?.abort()
     probeController = new AbortController()
     v2Probing.value = true
@@ -198,7 +232,8 @@ export const useAppStore = defineStore('app', () => {
     try {
       const text = (await navigator.clipboard.readText()).trim()
       if (text) {
-        url.value = text
+        const cleaned = extractUrl(text)
+        url.value = cleaned || text
         urlError.value = ''
       }
     } catch {

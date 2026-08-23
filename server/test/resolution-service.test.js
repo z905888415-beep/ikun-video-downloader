@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createProviderRegistry } from '../providers/provider-registry.js'
-import { createResolutionService } from '../core/resolution-service.js'
+import { createResolutionService, extractUrl, normalizeUrl } from '../core/resolution-service.js'
 import { createAssetRegistry } from '../core/asset-registry.js'
 import { createResolution, createAsset, createAction } from '../core/contracts.js'
 
@@ -183,3 +183,29 @@ test('资产缺少媒体地址时抛出 PROVIDER_FAILED', async () => {
   const svc = createResolutionService({ registry, assets })
   await assert.rejects(() => svc.resolve('https://x.com/v'), (e) => e.code === 'PROVIDER_FAILED')
 })
+
+test('智能提取手机端分享文案中的真实网址 (抖音/小红书/快手/B站/带标点)', async () => {
+  // 1. 抖音分享口令
+  const douyin = '7.32 e@q.ck 03/29 ... 复制此链接，打开Douyin搜索，直接观看视频！ https://v.douyin.com/iJabcdef/ 精彩内容'
+  assert.equal(extractUrl(douyin), 'https://v.douyin.com/iJabcdef/')
+  assert.equal(normalizeUrl(douyin), 'https://v.douyin.com/iJabcdef/')
+
+  // 2. 带有中文句号、逗号、括号粘连
+  const withPunctuation = '赶紧来看看：【https://www.xiaohongshu.com/explore/64a93821000000001300xxxx?xsec_token=123】。'
+  assert.equal(extractUrl(withPunctuation), 'https://www.xiaohongshu.com/explore/64a93821000000001300xxxx?xsec_token=123')
+  assert.equal(normalizeUrl(withPunctuation), 'https://www.xiaohongshu.com/explore/64a93821000000001300xxxx?xsec_token=123')
+
+  // 3. 裸域名短链格式
+  const bareShortLink = '分享一个好视频 v.douyin.com/xyz123/ 来看'
+  assert.equal(extractUrl(bareShortLink), 'https://v.douyin.com/xyz123/')
+  assert.equal(normalizeUrl(bareShortLink), 'https://v.douyin.com/xyz123/')
+
+  // 4. 服务端 resolve 直接支持带文案的输入
+  const registry = createProviderRegistry()
+  registry.register(fakeProvider('ytdlp', () => true))
+  const assets = createAssetRegistry()
+  const svc = createResolutionService({ registry, assets })
+  const r = await svc.resolve(douyin)
+  assert.equal(r.provider, 'ytdlp')
+})
+

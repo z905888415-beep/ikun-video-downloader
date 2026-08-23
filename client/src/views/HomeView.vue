@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { useAppStore } from '../stores/app'
+import { extractUrl, useAppStore } from '../stores/app'
 import Icon from '../components/Icon.vue'
 import { downloadHls } from '../lib/hls-download'
 import { downloadImagesAsZip } from '../lib/images-zip'
@@ -182,6 +182,17 @@ function onEnter(e: KeyboardEvent): void {
   if (e.key === 'Enter') void store.doResolveV2()
 }
 
+function onPaste(e: ClipboardEvent): void {
+  const text = e.clipboardData?.getData('text') || ''
+  if (!text) return
+  const cleaned = extractUrl(text)
+  if (cleaned && cleaned !== text) {
+    e.preventDefault()
+    store.url = cleaned
+    store.urlError = ''
+  }
+}
+
 function safeFilename(title: string, action: { preferredExt?: string; assetIds: string[] }): string {
   const base = (title || 'video').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim().slice(0, 120) || 'video'
   const asset = store.v2Resolution?.assets.find((x) => x.id === action.assetIds[0])
@@ -217,8 +228,9 @@ function fmtDuration(seconds?: number): string {
             inputmode="url"
             autocomplete="off"
             spellcheck="false"
-            placeholder="粘贴视频链接，回车解析…"
+            placeholder="粘贴短视频分享文案或链接，回车解析…"
             @keydown="onEnter"
+            @paste="onPaste"
           />
           <button class="btn btn-ghost btn-sm beam-paste" type="button" @click="store.pasteFromClipboard()">
             <Icon name="clipboard" :size="13" />

@@ -6,15 +6,58 @@ function cloneResolution(r) {
   return { ...r, assets: r.assets.map((a) => ({ ...a })), actions: r.actions.map((a) => ({ ...a })) }
 }
 
-function normalizeUrl(value) {
+export function extractUrl(value) {
+  if (typeof value !== 'string') return ''
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+
+  // 1. 优先匹配 http:// 或 https:// 开头的 URL
+  const httpMatch = trimmed.match(/https?:\/\/[^\s\u4e00-\u9fa5<>'"()[\]{}]+/i)
+  if (httpMatch) {
+    let candidate = httpMatch[0]
+    candidate = candidate.replace(/[.,;!?:'"`\u3002\uff0c\uff01\uff1f\uff1b\uff1a\u201c\u201d\u2018\u2019\u3010\u3011\uff08\uff09\u3008\u3009\u300a\u300b]+$/, '')
+    return candidate
+  }
+
+  // 2. 如果包含其它非 http/https 协议头（如 ftp://, file:// 等），原样返回以便被协议校验拒绝
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//i.test(trimmed)) {
+    return trimmed
+  }
+
+  // 3. 匹配没有写协议前缀的短链或域名
+  const domainMatch = trimmed.match(/(?:[a-zA-Z0-9-]+\.)+(?:com|tv|cn|net|org|cc|me|app|be|link|site|top|xyz|co|io)\/[^\s\u4e00-\u9fa5<>'"()[\]{}]*/i)
+  if (domainMatch) {
+    let candidate = domainMatch[0]
+    candidate = candidate.replace(/[.,;!?:'"`\u3002\uff0c\uff01\uff1f\uff1b\uff1a\u201c\u201d\u2018\u2019\u3010\u3011\uff08\uff09\u3008\u3009\u300a\u300b]+$/, '')
+    return `https://${candidate}`
+  }
+
+  return trimmed
+}
+
+export function normalizeUrl(value) {
+  const extracted = extractUrl(value)
+  if (!extracted) {
+    throw new AppError('VALIDATION_ERROR', '请提供视频链接或分享文本', false)
+  }
   let url
   try {
-    url = new URL(String(value || '').trim())
+    let candidate = extracted
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//i.test(candidate)) {
+      // 已带协议头（http/https/ftp等）
+    } else {
+      // 裸域名或短链
+      candidate = `https://${candidate}`
+    }
+    url = new URL(candidate)
   } catch {
-    throw new AppError('VALIDATION_ERROR', '链接无效', false)
+    throw new AppError('VALIDATION_ERROR', '链接无效，请粘贴有效的视频网址或分享文本', false)
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new AppError('VALIDATION_ERROR', '仅支持 http/https 链接', false)
+  }
+  if (!url.hostname || !url.hostname.includes('.') || url.hostname.endsWith('.')) {
+    throw new AppError('VALIDATION_ERROR', '链接无效，请包含有效的域名', false)
   }
   return url.toString()
 }
