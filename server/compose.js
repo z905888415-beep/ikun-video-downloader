@@ -1,6 +1,7 @@
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProviderRegistry } from './providers/provider-registry.js'
+import { createDouyinProvider } from './providers/douyin-provider.js'
 import { createYtdlpProvider } from './providers/ytdlp-provider.js'
 import { createResolutionService } from './core/resolution-service.js'
 import { createAssetRegistry } from './core/asset-registry.js'
@@ -23,6 +24,10 @@ const DATA_DIR = join(WEB_ROOT, 'data')
 export function composeApp({ settings = {} } = {}) {
   const registry = createProviderRegistry()
   const assets = createAssetRegistry()
+  // 注册抖音专属解析引擎（优先尝试，支持图集/最高画质无水印，失败自动降级到 yt-dlp）
+  registry.register(createDouyinProvider({
+    cookies: settings.douyinCookies || ''
+  }))
   registry.register(createYtdlpProvider({
     binDir: BIN_DIR,
     cookiesFile: settings.cookiesFile,
