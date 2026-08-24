@@ -3,7 +3,6 @@ import { onMounted } from 'vue'
 import { useAppStore, type PageId } from './stores/app'
 import Icon from './components/Icon.vue'
 import HomeView from './views/HomeView.vue'
-import QueueView from './views/QueueView.vue'
 import ToolboxView from './views/ToolboxView.vue'
 import SuanleView from './views/SuanleView.vue'
 import HistoryView from './views/HistoryView.vue'
@@ -12,12 +11,11 @@ import SettingsView from './views/SettingsView.vue'
 const store = useAppStore()
 
 const pages: { id: PageId; label: string; short: string; icon: string }[] = [
-  { id: 'home', label: '解析下载', short: '解析', icon: 'sparkles' },
-  { id: 'queue', label: '下载队列', short: '队列', icon: 'layers' },
+  { id: 'home', label: '解析与下载', short: '解析', icon: 'sparkles' },
   { id: 'tools', label: '工具箱', short: '工具', icon: 'grid' },
   { id: 'suanle', label: '命理', short: '命理', icon: 'moon' },
   { id: 'history', label: '历史记录', short: '历史', icon: 'clock' },
-  { id: 'settings', label: '设置', short: '设置', icon: 'sliders' }
+  { id: 'settings', label: '服务状态', short: '状态', icon: 'sliders' }
 ]
 
 onMounted(() => {
@@ -50,7 +48,7 @@ onMounted(() => {
         >
           <Icon :name="p.icon" :size="15" />
           {{ p.label }}
-          <span v-if="p.id === 'queue' && store.v2RunningCount" class="nav-badge">
+          <span v-if="p.id === 'home' && store.v2RunningCount" class="nav-badge">
             {{ store.v2RunningCount }}
           </span>
         </button>
@@ -76,7 +74,6 @@ onMounted(() => {
 
         <Transition name="page" mode="out-in">
           <HomeView v-if="store.page === 'home'" key="home" />
-          <QueueView v-else-if="store.page === 'queue'" key="queue" />
           <ToolboxView v-else-if="store.page === 'tools'" key="tools" />
           <SuanleView v-else-if="store.page === 'suanle'" key="suanle" />
           <HistoryView v-else-if="store.page === 'history'" key="history" />
@@ -94,10 +91,10 @@ onMounted(() => {
         type="button"
         @click="store.page = p.id"
       >
-        <span v-if="p.id === 'queue' && store.v2RunningCount" class="nav-badge">
+        <span v-if="p.id === 'home' && store.v2RunningCount" class="nav-badge">
           {{ store.v2RunningCount }}
         </span>
-        <Icon :name="p.icon" :size="19" />
+        <Icon :name="(p.icon as any)" :size="19" />
         <span>{{ p.short }}</span>
       </button>
     </nav>

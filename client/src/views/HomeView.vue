@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { extractUrl, useAppStore } from '../stores/app'
 import Icon from '../components/Icon.vue'
 import { downloadHls } from '../lib/hls-download'
 import { downloadImagesAsZip } from '../lib/images-zip'
-import { apiV2 } from '../api/client'
+import { apiV2, type V2Job } from '../api/client'
 
 const store = useAppStore()
 
@@ -22,10 +22,32 @@ const activeDownload = ref<{
 } | null>(null)
 
 const STATUS_TEXT: Record<string, string> = {
-  RESOLVING: '解析中', READY: '准备下载', QUEUED: '排队中', DOWNLOADING: '下载中',
-  PROCESSING: '处理中', RETRY_WAIT: '等待重试', COMPLETED: '已完成', FAILED: '失败',
-  CANCELLED: '已取消', EXPIRED: '已过期'
+  RESOLVING: '解析中',
+  READY: '准备下载',
+  DELIVERED: '已交付',
+  QUEUED: '排队中',
+  DOWNLOADING: '下载中',
+  PROCESSING: '处理中',
+  RETRY_WAIT: '等待重试',
+  COMPLETED: '已完成',
+  FAILED: '失败',
+  CANCELLED: '已取消',
+  EXPIRED: '已过期'
 }
+
+const ACTIVE_STATUS = ['RESOLVING', 'DOWNLOADING', 'PROCESSING', 'DELIVERED']
+const WAIT_STATUS = ['READY', 'QUEUED', 'RETRY_WAIT']
+const FINAL_STATUS = ['COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED']
+
+const activeTasks = computed(() => store.v2Jobs.filter((j) => ACTIVE_STATUS.includes(j.status)))
+const queuedTasks = computed(() => store.v2Jobs.filter((j) => WAIT_STATUS.includes(j.status)))
+const finishedTasks = computed(() => store.v2Jobs.filter((j) => FINAL_STATUS.includes(j.status)))
+const runningCount = computed(() => store.v2Jobs.filter((j) => !FINAL_STATUS.includes(j.status)).length)
+
+onMounted(() => {
+  store.startV2Polling()
+  void store.refreshV2Jobs()
+})
 
 function statusText(dl: { kind: string; status: string; percent: number }): string {
   if (dl.status === 'done') return '完成'
@@ -33,6 +55,20 @@ function statusText(dl: { kind: string; status: string; percent: number }): stri
   if (dl.status === 'downloading') return `下载中 ${dl.percent}%`
   if (dl.status === 'queued') return '排队中'
   return STATUS_TEXT[dl.status] || dl.status
+}
+
+function jobStatusLabel(status: string): string {
+  return STATUS_TEXT[status] || status
+}
+
+function jobTitle(job: V2Job): string {
+  return job.filename || job.sourceUrl
+}
+
+function jobSub(job: V2Job): string {
+  const parts = [job.actionId]
+  if (job.mode && job.mode !== 'auto') parts.push(job.mode)
+  return parts.join(' · ')
 }
 
 function saveBlob(blob: Blob, name: string): void {
@@ -212,12 +248,12 @@ function fmtDuration(seconds?: number): string {
 
 <template>
   <div class="home-view">
-    <!-- Hero -->
+    <!-- Hero 区域 -->
     <section class="hero">
       <h1 class="hero-title">全网视频，<span class="hero-grad">一触即取</span></h1>
-      <p class="hero-sub">粘贴链接，解析画质，高速下载。电脑与手机浏览器均可使用。</p>
+      <p class="hero-sub">粘贴短视频分享文案或链接，解析画质，高速下载</p>
 
-      <!-- 解析输入 -->
+      <!-- 解析输入框 -->
       <div class="beam" :class="{ probing: store.v2Probing }">
         <div class="beam-inner">
           <Icon class="beam-icon" name="link" :size="18" />
@@ -255,9 +291,9 @@ function fmtDuration(seconds?: number): string {
 
       <!-- 支持站点 -->
       <div class="sites-row">
-        <span class="sites-label">支持站点</span>
+        <span class="sites-label">支持平台</span>
         <span v-for="s in SITES" :key="s" class="site-chip">{{ s }}</span>
-        <span class="site-chip more">等 1800+</span>
+        <span class="site-chip more">等 1800+ 站点</span>
       </div>
 
       <p v-if="store.binary && !store.binary.ytdlpOk" class="alert" style="margin-top: 18px">
@@ -269,7 +305,7 @@ function fmtDuration(seconds?: number): string {
       </p>
     </section>
 
-    <!-- 解析失败 -->
+    <!-- 解析状态：失败 -->
     <div v-if="store.v2Error" class="card card-pad state-card rise-in">
       <div class="empty-orb"><Icon name="alert" :size="24" /></div>
       <div class="empty-title">解析失败</div>
@@ -281,20 +317,20 @@ function fmtDuration(seconds?: number): string {
         </button>
         <button class="btn btn-ghost btn-sm" type="button" @click="store.page = 'settings'">
           <Icon name="sliders" :size="13" />
-          检查设置
+          检查状态
         </button>
       </div>
     </div>
 
-    <!-- 解析中 -->
+    <!-- 解析状态：解析中 -->
     <div v-else-if="store.v2Probing" class="card card-pad state-card rise-in">
       <div class="empty-orb"><Icon name="sparkles" :size="24" /></div>
       <div class="empty-title">正在解析视频信息</div>
-      <div class="empty-desc">调用本地解析器获取标题、时长与可用媒体</div>
+      <div class="empty-desc">智能清洗文案并调用解析引擎获取标题、画质与资源</div>
       <div class="loading-track"><i /></div>
     </div>
 
-    <!-- 解析结果 -->
+    <!-- 解析状态：解析成功结果 -->
     <div v-else-if="store.v2Resolution" class="card result-card rise-in">
       <div class="result-grid">
         <div class="thumb-frame">
@@ -310,7 +346,7 @@ function fmtDuration(seconds?: number): string {
             <span class="chip">{{ store.v2Resolution.platform || store.v2Resolution.provider }}</span>
           </div>
           <div class="format-block">
-            <div class="format-head"><span>下载</span></div>
+            <div class="format-head"><span>选择下载规格：</span></div>
             <div class="preset-pills">
               <button
                 v-for="a in store.v2Resolution.actions"
@@ -328,14 +364,7 @@ function fmtDuration(seconds?: number): string {
       </div>
     </div>
 
-    <!-- 空状态 -->
-    <div v-else class="card card-pad state-card">
-      <div class="empty-orb"><Icon name="play" :size="24" /></div>
-      <div class="empty-title">等待解析</div>
-      <div class="empty-desc">粘贴视频链接后回车，将显示标题、时长、缩略图与可选画质</div>
-    </div>
-
-    <!-- 下载进度 -->
+    <!-- 即时下载操作进度条 -->
     <div v-if="activeDownload" class="card card-pad dl-progress rise-in">
       <div class="dl-head">
         <strong>{{ activeDownload.label }}</strong>
@@ -344,32 +373,180 @@ function fmtDuration(seconds?: number): string {
       <div class="pbar"><i :style="{ width: `${activeDownload.percent}%` }" /></div>
       <div class="dl-foot">
         <span v-if="activeDownload.kind === 'task' && activeDownload.status !== 'done' && activeDownload.status !== 'error'">
-          任务 {{ activeDownload.percent }}%
+          任务进度 {{ activeDownload.percent }}%
         </span>
         <span v-else-if="activeDownload.status === 'done'">
           <template v-if="activeDownload.kind === 'task'">
-            处理完成 · 点击「保存文件」下载到本地
+            处理完成 · 请在下方队列或点击右侧「保存文件」下载到本地
           </template>
           <template v-else>
             已保存到浏览器下载目录
           </template>
         </span>
-        <span v-else-if="activeDownload.status === 'error'">下载失败，请重试</span>
+        <span v-else-if="activeDownload.status === 'error'">下载遇到问题，请重试</span>
         <span v-else>{{ activeDownload.percent }}%</span>
-        <button v-if="activeDownload.status === 'error'" class="btn btn-ghost btn-sm" type="button" @click="retryActive()">
-          <Icon name="refresh" :size="13" />重试
-        </button>
-        <a
-          v-if="activeDownload.kind === 'task' && activeDownload.status === 'done' && activeDownload.jobId"
-          class="btn btn-primary btn-sm"
-          :href="apiV2.fileUrl(activeDownload.jobId)"
-          download
-        >
-          <Icon name="download" :size="13" />保存文件
-        </a>
+        
+        <div class="dl-actions">
+          <button v-if="activeDownload.status === 'error'" class="btn btn-ghost btn-sm" type="button" @click="retryActive()">
+            <Icon name="refresh" :size="13" />重试
+          </button>
+          <a
+            v-if="activeDownload.kind === 'task' && activeDownload.status === 'done' && activeDownload.jobId"
+            class="btn btn-primary btn-sm"
+            :href="apiV2.fileUrl(activeDownload.jobId)"
+            download
+          >
+            <Icon name="download" :size="13" />保存文件
+          </a>
+        </div>
       </div>
     </div>
 
+    <!-- ==================== 底部内嵌：下载队列模块 ==================== -->
+    <section class="queue-section rise-in">
+      <div class="queue-section-header">
+        <div class="queue-title-wrap">
+          <h2 class="queue-title">
+            <Icon name="layers" :size="18" />
+            下载队列
+          </h2>
+          <span class="queue-counter">
+            {{ store.v2Jobs.length }} 个任务
+            <template v-if="runningCount"> · {{ runningCount }} 进行中</template>
+          </span>
+        </div>
+        <div class="queue-header-actions">
+          <button class="btn btn-ghost btn-sm" type="button" title="刷新队列状态" @click="store.refreshV2Jobs()">
+            <Icon name="refresh" :size="13" />
+            刷新
+          </button>
+        </div>
+      </div>
+
+      <!-- 队列空状态 -->
+      <div v-if="!store.v2Jobs.length" class="card empty-queue-card">
+        <div class="empty-orb-sm"><Icon name="layers" :size="20" /></div>
+        <div class="empty-queue-text">
+          <strong>暂无下载任务</strong>
+          <span>在上方粘贴链接解析后，选择画质即可在此处跟踪下载进度</span>
+        </div>
+      </div>
+
+      <!-- 任务列表 -->
+      <div v-else class="queue-list-wrap">
+        <!-- 进行中任务 -->
+        <template v-if="activeTasks.length">
+          <div class="group-label">
+            <span class="group-dot live" />
+            进行中 · {{ activeTasks.length }}
+          </div>
+          <div class="stagger queue-cards-grid">
+            <div v-for="j in activeTasks" :key="j.id" class="card task-card active-card">
+              <div class="task-thumb">
+                <Icon name="video" :size="20" />
+              </div>
+              <div class="task-main">
+                <div class="task-head">
+                  <div class="task-title" :title="jobTitle(j)">{{ jobTitle(j) }}</div>
+                  <span class="status-pill" :class="j.status">{{ jobStatusLabel(j.status) }}</span>
+                </div>
+                <div class="task-sub">{{ jobSub(j) }}</div>
+                <div class="pbar task-pbar"><i :style="{ width: `${Math.min(100, j.percent || 0)}%` }" /></div>
+                <div class="task-meta">
+                  <span class="task-percent">{{ (j.percent || 0).toFixed(1) }}%</span>
+                  <span v-if="j.phase">{{ j.phase }}</span>
+                  <span v-if="j.speed">{{ j.speed }}</span>
+                  <span v-if="j.eta">剩余 {{ j.eta }}</span>
+                  <span v-if="j.error" class="task-error">{{ j.error.message }}</span>
+                </div>
+              </div>
+              <div class="task-actions">
+                <button class="btn btn-danger btn-sm" type="button" @click="store.cancelV2Job(j.id)">
+                  <Icon name="x" :size="13" />
+                  取消
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- 等待中任务 -->
+        <template v-if="queuedTasks.length">
+          <div class="group-label">
+            <span class="group-dot wait" />
+            等待中 · {{ queuedTasks.length }}
+          </div>
+          <div class="stagger queue-cards-grid">
+            <div v-for="j in queuedTasks" :key="j.id" class="card task-card">
+              <div class="task-thumb">
+                <Icon name="video" :size="20" />
+              </div>
+              <div class="task-main">
+                <div class="task-head">
+                  <div class="task-title" :title="jobTitle(j)">{{ jobTitle(j) }}</div>
+                  <span class="status-pill queued">{{ jobStatusLabel(j.status) }}</span>
+                </div>
+                <div class="task-sub">{{ jobSub(j) }}</div>
+              </div>
+              <div class="task-actions">
+                <button class="btn btn-danger btn-sm" type="button" @click="store.cancelV2Job(j.id)">
+                  <Icon name="x" :size="13" />
+                  取消
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- 已结束任务 -->
+        <template v-if="finishedTasks.length">
+          <div class="group-label">
+            <span class="group-dot done" />
+            已结束 · {{ finishedTasks.length }}
+          </div>
+          <div class="stagger queue-cards-grid">
+            <div v-for="j in finishedTasks" :key="j.id" class="card task-card dim">
+              <div class="task-thumb">
+                <Icon name="video" :size="20" />
+              </div>
+              <div class="task-main">
+                <div class="task-head">
+                  <div class="task-title" :title="jobTitle(j)">{{ jobTitle(j) }}</div>
+                  <span class="status-pill" :class="j.status">{{ jobStatusLabel(j.status) }}</span>
+                </div>
+                <div class="task-sub">
+                  {{ jobSub(j) }}
+                  <template v-if="j.filename"> · {{ j.filename }}</template>
+                </div>
+                <div v-if="j.error" class="task-meta">
+                  <span class="task-error">{{ j.error.message }}</span>
+                </div>
+              </div>
+              <div class="task-actions">
+                <a
+                  v-if="j.status === 'COMPLETED' && j.filepath"
+                  class="btn btn-primary btn-sm"
+                  :href="apiV2.fileUrl(j.id)"
+                  download
+                >
+                  <Icon name="download" :size="13" />
+                  保存文件
+                </a>
+                <button
+                  v-if="j.status === 'FAILED' || j.status === 'RETRY_WAIT' || j.status === 'CANCELLED'"
+                  class="btn btn-ghost btn-sm"
+                  type="button"
+                  @click="store.retryV2Job(j.id)"
+                >
+                  <Icon name="refresh" :size="13" />
+                  重试
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -377,12 +554,13 @@ function fmtDuration(seconds?: number): string {
 .home-view {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
+  padding-bottom: 24px;
 }
 
 /* ---------- Hero ---------- */
 .hero {
-  padding: clamp(20px, 4vw, 40px) 0 4px;
+  padding: clamp(16px, 3.5vw, 36px) 0 4px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -392,13 +570,12 @@ function fmtDuration(seconds?: number): string {
 .hero-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(28px, 5vw, 42px);
+  font-size: clamp(26px, 4.8vw, 40px);
   font-weight: 720;
-  line-height: 1.12;
+  line-height: 1.15;
   letter-spacing: -0.035em;
 }
 
-/* 高亮 · Apple Intelligence 渐变 */
 .hero-grad {
   background: linear-gradient(96deg, #0a84ff 12%, #5e5ce6 58%, #bf5af2 96%);
   -webkit-background-clip: text;
@@ -408,7 +585,7 @@ function fmtDuration(seconds?: number): string {
 }
 
 .hero-sub {
-  margin: 10px 0 24px;
+  margin: 10px 0 22px;
   color: var(--text-2);
   font-size: 14px;
 }
@@ -446,7 +623,7 @@ function fmtDuration(seconds?: number): string {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 8px 7px 16px;
+  padding: 6px 8px 6px 16px;
 }
 
 .beam-icon {
@@ -665,7 +842,7 @@ function fmtDuration(seconds?: number): string {
   border-color: var(--accent);
 }
 
-/* ---------- 下载进度 ---------- */
+/* ---------- 即时下载进度 ---------- */
 .dl-progress {
   display: flex;
   flex-direction: column;
@@ -719,6 +896,217 @@ function fmtDuration(seconds?: number): string {
   color: var(--text-2);
 }
 
+.dl-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------- 底部内嵌：下载队列区块 ---------- */
+.queue-section {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.queue-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 2px;
+}
+
+.queue-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.queue-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text);
+}
+
+.queue-counter {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+.empty-queue-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-md);
+}
+
+.empty-orb-sm {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.empty-queue-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.empty-queue-text strong {
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.empty-queue-text span {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.queue-list-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.queue-cards-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.group-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-2);
+}
+
+.group-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.group-dot.live {
+  background: var(--blue);
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+.group-dot.wait {
+  background: var(--warn);
+}
+
+.group-dot.done {
+  background: var(--text-3);
+}
+
+.task-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  transition: border-color 0.15s;
+}
+
+.task-card:hover {
+  border-color: var(--border-strong);
+}
+
+.task-card.dim {
+  opacity: 0.85;
+}
+
+.task-thumb {
+  width: 54px;
+  height: 42px;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.task-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-sub {
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-pbar {
+  margin-top: 3px;
+}
+
+.task-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.task-percent {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.task-error {
+  color: var(--danger);
+}
+
+.task-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 @media (max-width: 720px) {
   .result-grid {
     grid-template-columns: 1fr;
@@ -731,6 +1119,16 @@ function fmtDuration(seconds?: number): string {
 
   .hero {
     padding-top: 12px;
+  }
+}
+
+@media (max-width: 640px) {
+  .task-thumb {
+    display: none;
+  }
+  
+  .task-card {
+    padding: 10px 12px;
   }
 }
 </style>

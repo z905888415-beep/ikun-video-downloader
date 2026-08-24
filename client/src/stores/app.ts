@@ -10,7 +10,7 @@ import {
   type V2Resolution
 } from '../api/client'
 
-export type PageId = 'home' | 'queue' | 'tools' | 'suanle' | 'history' | 'settings'
+export type PageId = 'home' | 'tools' | 'suanle' | 'history' | 'settings'
 
 export function extractUrl(value: string): string {
   if (!value) return ''
