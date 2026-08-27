@@ -109,8 +109,10 @@ app.get('/api/health', (_req, res) => {
 })
 
 app.get('/api/binaries', async (_req, res) => {
-  const ytdlpPath = join(BIN_DIR, 'yt-dlp.exe')
-  const ffmpegPath = join(BIN_DIR, 'ffmpeg.exe')
+  const ytdlpName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
+  const ffmpegName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
+  const ytdlpPath = join(BIN_DIR, ytdlpName)
+  const ffmpegPath = join(BIN_DIR, ffmpegName)
   let ytdlpOk = false
   let version
   try {
