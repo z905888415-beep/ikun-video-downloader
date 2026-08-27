@@ -112,7 +112,7 @@ export function createYtdlpProvider({
         }
         if (!protocolOk) continue
         const isVideo = f.vcodec && f.vcodec !== 'none'
-        const isAudio = !isVideo && f.acodec && f.acodec !== 'none'
+        const isAudio = !isVideo && (f.acodec ? f.acodec !== 'none' : Boolean(f.audio_ext && f.audio_ext !== 'none'))
         if (!isVideo && !isAudio) continue
 
         const asset = createAsset({
