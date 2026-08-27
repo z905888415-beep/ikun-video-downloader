@@ -16,7 +16,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '../..')
 const WEB_ROOT = resolve(__dirname, '..')
 const DATA_DIR = join(WEB_ROOT, 'data')
-const BIN_DIR = join(ROOT, 'resources', 'bin')
+// 兼容两种目录结构：
+//   A. GitHub 仓库布局：<root>/server/index.js + <root>/resources/bin
+//   B. 旧开发布局：<root>/web/server/index.js + <root>/resources/bin
+const BIN_DIR = existsSync(join(resolve(__dirname, '..'), 'resources', 'bin'))
+  ? join(resolve(__dirname, '..'), 'resources', 'bin')
+  : join(ROOT, 'resources', 'bin')
 const DOWNLOADS_DIR = join(WEB_ROOT, 'downloads')
 const PUBLIC_DIR = join(WEB_ROOT, 'client', 'dist')
 const SUANLE_DIR = join(WEB_ROOT, 'suanle')
