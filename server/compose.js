@@ -1,5 +1,6 @@
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { existsSync } from 'node:fs'
 import { createProviderRegistry } from './providers/provider-registry.js'
 import { createDouyinProvider } from './providers/douyin-provider.js'
 import { createYtdlpProvider } from './providers/ytdlp-provider.js'
@@ -17,7 +18,12 @@ import { createHlsDelivery } from './delivery/hls-delivery.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const WEB_ROOT = resolve(__dirname, '..')
-const BIN_DIR = join(__dirname, '..', '..', 'resources', 'bin')
+// 兼容两种目录结构：
+//   A. GitHub 仓库布局：<root>/server/compose.js + <root>/resources/bin
+//   B. 旧开发布局：<root>/web/server/compose.js + <root>/resources/bin
+const BIN_DIR = existsSync(join(resolve(__dirname, '..'), 'resources', 'bin'))
+  ? join(resolve(__dirname, '..'), 'resources', 'bin')
+  : join(__dirname, '..', '..', 'resources', 'bin')
 const DOWNLOADS_DIR = join(WEB_ROOT, 'downloads')
 const DATA_DIR = join(WEB_ROOT, 'data')
 
