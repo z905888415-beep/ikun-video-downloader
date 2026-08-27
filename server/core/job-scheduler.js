@@ -49,8 +49,14 @@ export function createJobScheduler({ store, retry, concurrency: initialConcurren
         store.update(job.id, { percent: 95, message: fallback ? '正在通过兜底通道下载…' : '正在下载…' })
       } else {
         for (let i = 0; i < urls.length; i++) {
-          const filepath = await mediaDownloader.download(job, urls[i], controller.signal, onProgress)
-          files[i === 0 ? 'video' : 'audio'] = filepath
+          const isHls = job.assetDeliveries?.[i] === 'hls' || /\.m3u8(\?|$)/i.test(urls[i] || '')
+          if (isHls) {
+            // HLS 清单直接交给 FFmpeg 处理（FFmpeg 原生支持 m3u8 协议），不预下载 manifest
+            files[i === 0 ? 'video' : 'audio'] = urls[i]
+          } else {
+            const filepath = await mediaDownloader.download(job, urls[i], controller.signal, onProgress)
+            files[i === 0 ? 'video' : 'audio'] = filepath
+          }
         }
       }
       // 阶段边界取消检查：下载完成后、进入 PROCESSING 前

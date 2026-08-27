@@ -224,6 +224,7 @@ export function createApiV2Router({ resolutions, assets, deliveries, scheduler, 
       job.assetUrls = action.assetIds
         .map((id) => assets.get(id)?.url)
         .filter(Boolean)
+      job.assetDeliveries = action.assetIds.map((id) => assets.get(id)?.delivery || 'redirect')
       job.headers = action.assetIds
         .map((id) => assets.get(id)?.headers || {})
         .reduce((acc, h) => ({ ...acc, ...h }), {})
