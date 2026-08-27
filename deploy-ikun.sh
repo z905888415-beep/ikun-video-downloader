@@ -8,7 +8,7 @@
 set -e
 
 LOG=/opt/keepalive/deploy.log
-SITE=/workspace/site
+SITE="${SITE:-/opt/ikun-video-downloader}"
 REPO_URL=https://github.com/z905888415-beep/ikun-video-downloader.git
 PORT="${PORT:-8787}"
 DOMAIN="${DOMAIN:-dl.zhangjianli.icu}"
@@ -66,15 +66,14 @@ if [ ! -x "$BIN_DIR/yt-dlp" ]; then
   chmod +x "$BIN_DIR/yt-dlp"
 fi
 if [ ! -x "$BIN_DIR/ffmpeg" ]; then
-  echo "⏳ 下载 Linux ffmpeg 核心…"
-  FF_VER=7.0.2
-  FF_URL="https://www.johnvansickle.com/ffmpeg/old-releases/ffmpeg-${FF_VER}-amd64-static.tar.xz"
+  echo "⏳ 下载 Linux ffmpeg 核心（BtbN 构建，勿用 johnvansickle 静态包——HLS 合并会段错误）…"
+  FF_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
   curl -sSL -o /tmp/ff.tar.xz "$FF_URL"
   tar -xf /tmp/ff.tar.xz -C /tmp
-  cp /tmp/ffmpeg-${FF_VER}-amd64-static/ffmpeg "$BIN_DIR/ffmpeg"
-  cp /tmp/ffmpeg-${FF_VER}-amd64-static/ffprobe "$BIN_DIR/ffprobe" 2>/dev/null || true
+  cp /tmp/ffmpeg-master-latest-linux64-gpl/bin/ffmpeg "$BIN_DIR/ffmpeg"
+  cp /tmp/ffmpeg-master-latest-linux64-gpl/bin/ffprobe "$BIN_DIR/ffprobe" 2>/dev/null || true
   chmod +x "$BIN_DIR/ffmpeg" "$BIN_DIR/ffprobe"
-  rm -rf /tmp/ff.tar.xz /tmp/ffmpeg-${FF_VER}-amd64-static
+  rm -rf /tmp/ff.tar.xz /tmp/ffmpeg-master-latest-linux64-gpl
 fi
 "$BIN_DIR/yt-dlp" --version && "$BIN_DIR/ffmpeg" -version 2>&1 | head -1
 echo "✅ Linux 二进制就绪: $BIN_DIR"
@@ -127,7 +126,7 @@ systemctl restart ikun-web.service || { echo "❌ 服务启动失败，查看日
 cat > /opt/keepalive/ikun_sync.sh << 'SYNCEOF'
 #!/bin/bash
 LOG=/opt/keepalive/sync.log
-SITE=/workspace/site
+SITE=/opt/ikun-video-downloader
 cd "$SITE" || exit 1
 git fetch origin master 2>/dev/null
 LOCAL=$(git rev-parse HEAD 2>/dev/null)
