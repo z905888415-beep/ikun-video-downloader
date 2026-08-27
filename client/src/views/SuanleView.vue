@@ -6,18 +6,18 @@ const frameHeight = ref(680)
 let resizeTimer: number | null = null
 
 const THEME_VARS: Record<string, string> = {
-  '--background': '#f5f5f7',
-  '--foreground': '#1d1d1f',
-  '--card': '#ffffff',
-  '--card-foreground': '#1d1d1f',
-  '--primary': '#0071e3',
-  '--primary-foreground': '#ffffff',
-  '--secondary': 'rgba(120, 120, 128, 0.08)',
-  '--secondary-foreground': '#1d1d1f',
-  '--muted': 'rgba(120, 120, 128, 0.1)',
-  '--muted-foreground': '#6e6e73',
-  '--border': 'rgba(0, 0, 0, 0.08)',
-  '--ring': 'rgba(0, 113, 227, 0.35)'
+  '--background': '#0b1120',
+  '--foreground': '#eef3ff',
+  '--card': '#111a2e',
+  '--card-foreground': '#eef3ff',
+  '--primary': '#4be3c2',
+  '--primary-foreground': '#07182b',
+  '--secondary': 'rgba(148, 180, 255, 0.1)',
+  '--secondary-foreground': '#eef3ff',
+  '--muted': 'rgba(148, 180, 255, 0.12)',
+  '--muted-foreground': 'rgba(233, 240, 255, 0.62)',
+  '--border': 'rgba(163, 190, 255, 0.14)',
+  '--ring': 'rgba(75, 227, 194, 0.4)'
 }
 
 function pushTheme(): void {
@@ -73,6 +73,7 @@ onBeforeUnmount(() => {
   width: 100%;
   min-height: 480px;
   border: 0;
-  background: var(--bg);
+  border-radius: var(--r-lg);
+  background: #0b1120;
 }
 </style>

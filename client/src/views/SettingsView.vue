@@ -78,14 +78,28 @@ onMounted(() => {
 .section-header, .meter-row { display: flex; align-items: center; gap: 12px; }
 .section-header { justify-content: space-between; margin-bottom: 18px; }
 .binary-box { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.binary-item { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 14px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg); }
-.binary-item small { grid-column: 1 / -1; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.binary-item.ok { border-color: var(--success-border); }
-.binary-item.bad { border-color: var(--danger-border); }
-.binary-state { font-size: 12px; color: var(--text-2); }
-.meter { flex: 1; height: 8px; border-radius: var(--r-full); overflow: hidden; background: var(--surface); }
-.meter i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.binary-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background:
+    linear-gradient(180deg, rgba(151, 184, 255, 0.05), rgba(151, 184, 255, 0.015) 42%),
+    rgba(11, 17, 33, 0.55);
+}
+.binary-item strong { font-family: var(--font-mono); letter-spacing: -0.01em; }
+.binary-item small { grid-column: 1 / -1; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.binary-item.ok { border-color: var(--success-border); box-shadow: inset 0 0 24px rgba(74, 222, 128, 0.05); }
+.binary-item.bad { border-color: var(--danger-border); box-shadow: inset 0 0 24px rgba(255, 138, 122, 0.05); }
+.binary-state { font-size: 12px; font-weight: 650; color: var(--text-2); }
+.binary-item.ok .binary-state { color: var(--success); }
+.binary-item.bad .binary-state { color: var(--danger); }
+.meter { flex: 1; height: 8px; border-radius: var(--r-full); overflow: hidden; background: rgba(148, 180, 255, 0.12); }
+.meter i { display: block; height: 100%; border-radius: inherit; background: var(--grad-cta); box-shadow: 0 0 10px rgba(101, 222, 200, 0.4); }
 .hint { color: var(--text-2); line-height: 1.7; }
 .list { margin: 8px 0 0; padding-left: 20px; }
+.list li::marker { color: var(--accent); }
 @media (max-width: 720px) { .settings-grid, .binary-box { grid-template-columns: 1fr; } .span-2 { grid-column: span 1; } }
 </style>

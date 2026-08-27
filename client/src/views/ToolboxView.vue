@@ -855,23 +855,30 @@ async function runPdf(): Promise<void> {
   padding: 14px 16px;
   border-radius: var(--r-lg);
   border: 1px solid var(--border);
-  background: var(--surface);
+  background:
+    linear-gradient(180deg, rgba(151, 184, 255, 0.05), rgba(151, 184, 255, 0.015) 42%),
+    rgba(11, 17, 33, 0.55);
   text-align: left;
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color 0.18s var(--ease), background 0.18s var(--ease), transform 0.18s var(--ease-spring), box-shadow 0.18s var(--ease);
 }
 
 .bento-card:hover {
   border-color: var(--border-strong);
+  transform: translateY(-2px);
 }
 
 .bento-card.active {
-  border-color: var(--accent);
-  background: var(--surface);
+  border-color: var(--accent-border);
+  background:
+    linear-gradient(180deg, rgba(75, 227, 194, 0.1), rgba(75, 227, 194, 0.02) 55%),
+    rgba(11, 17, 33, 0.6);
+  box-shadow: 0 0 0 1px rgba(75, 227, 194, 0.12), 0 10px 30px rgba(75, 227, 194, 0.12);
 }
 
 .bento-icon {
   width: 38px;
   height: 38px;
+  border-radius: 12px;
   display: grid;
   place-items: center;
   flex-shrink: 0;
@@ -881,8 +888,9 @@ async function runPdf(): Promise<void> {
 }
 
 .bento-card.active .bento-icon {
-  color: #fff;
-  background: var(--accent);
+  color: var(--on-grad);
+  background: var(--grad-cta);
+  box-shadow: 0 6px 18px rgba(101, 222, 200, 0.35);
 }
 
 .bento-text {
@@ -916,11 +924,12 @@ async function runPdf(): Promise<void> {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  color: #fff;
-  background: var(--accent);
+  color: var(--on-grad);
+  background: var(--grad-cta);
+  box-shadow: 0 4px 12px rgba(101, 222, 200, 0.4);
 }
 
-/* ---------- 拖拽区 ---------- */
+/* ---------- 拖拽区 · Upload 上传（虚线装备槽范式） ---------- */
 .drop-card {
   display: flex;
   flex-direction: column;
@@ -929,15 +938,16 @@ async function runPdf(): Promise<void> {
   padding: clamp(26px, 5vw, 40px) 20px;
   border-radius: var(--r-lg);
   border: 1.5px dashed var(--border-strong);
-  background: var(--surface);
+  background: rgba(11, 17, 33, 0.4);
   cursor: pointer;
   text-align: center;
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color 0.18s var(--ease), background 0.18s var(--ease), box-shadow 0.18s var(--ease);
 }
 
 .drop-card:hover {
-  border-color: var(--text-3);
-  background: var(--bg);
+  border-color: var(--accent);
+  background: rgba(75, 227, 194, 0.05);
+  box-shadow: 0 0 32px rgba(75, 227, 194, 0.1) inset;
 }
 
 .drop-card input {
@@ -945,13 +955,14 @@ async function runPdf(): Promise<void> {
 }
 
 .drop-icon {
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   border-radius: 50%;
   display: grid;
   place-items: center;
-  color: var(--text-3);
-  background: var(--surface-2);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1.5px dashed var(--accent-border);
 }
 
 .drop-card strong {
@@ -987,33 +998,7 @@ async function runPdf(): Promise<void> {
   margin-top: 16px;
 }
 
-.preset-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.preset-pill {
-  padding: 6px 13px;
-  border-radius: var(--r-full);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-2);
-  font-size: 12.5px;
-  font-weight: 500;
-  transition: all 0.15s;
-}
-
-.preset-pill:hover {
-  color: var(--text);
-  border-color: var(--border-strong);
-}
-
-.preset-pill.active {
-  color: #fff;
-  background: var(--accent);
-  border-color: var(--accent);
-}
+/* 规格选择使用全局 .preset-pills（Segmented 范式） */
 
 .result-msg {
   margin: 10px 0 0;

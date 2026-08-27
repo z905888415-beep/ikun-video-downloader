@@ -156,40 +156,64 @@ function statusLabel(status: string): string {
 </template>
 
 <style scoped>
+/* ---------- Statistic 统计数值卡（站酷参考「❙ 标签 + 大数字」） ---------- */
 .stats-strip {
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  align-items: center;
-  padding: 12px 16px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: stretch;
   margin-bottom: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface);
 }
 
 .stat-cell {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  min-width: 110px;
+  justify-content: center;
+  gap: 6px;
+  min-width: 150px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background:
+    linear-gradient(180deg, rgba(151, 184, 255, 0.05), rgba(151, 184, 255, 0.015) 42%),
+    rgba(11, 17, 33, 0.55);
 }
 
 .stat-cell-wide {
-  flex: 1;
   min-width: 220px;
 }
 
 .stat-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-size: 11px;
-  color: var(--text-3);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+}
+
+.stat-label::before {
+  content: '';
+  width: 3px;
+  height: 11px;
+  border-radius: var(--r-full);
+  background: linear-gradient(180deg, var(--lime), var(--accent));
+  box-shadow: 0 0 8px rgba(75, 227, 194, 0.55);
 }
 
 .stat-value {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
   color: var(--text);
   font-variant-numeric: tabular-nums;
+}
+
+.meter-row .stat-value {
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .stat-warn {
@@ -197,9 +221,10 @@ function statusLabel(status: string): string {
   padding: 1px 7px;
   border-radius: var(--r-full);
   font-size: 10.5px;
-  font-weight: 600;
-  color: var(--warning);
-  background: var(--warning-bg);
+  font-weight: 650;
+  color: var(--warn);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
 }
 
 .meter-row {
@@ -212,19 +237,20 @@ function statusLabel(status: string): string {
   flex: 1;
   height: 7px;
   border-radius: var(--r-full);
-  background: var(--bg);
+  background: rgba(148, 180, 255, 0.12);
   overflow: hidden;
 }
 
 .meter-fill {
   height: 100%;
   border-radius: var(--r-full);
-  background: var(--success);
-  transition: width 0.4s ease;
+  background: var(--grad-cta);
+  box-shadow: 0 0 10px rgba(101, 222, 200, 0.4);
+  transition: width 0.4s var(--ease);
 }
 
 .meter-fill.warn {
-  background: var(--warning);
+  background: linear-gradient(90deg, var(--warn), var(--danger));
 }
 
 .history-hint {
@@ -241,10 +267,10 @@ function statusLabel(status: string): string {
   flex: 1;
   min-width: 200px;
   max-width: 340px;
-  padding: 0 12px;
-  border-radius: var(--r-md);
+  padding: 0 14px;
+  border-radius: var(--r-full);
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: rgba(3, 7, 17, 0.45);
   color: var(--text-3);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
@@ -280,11 +306,12 @@ function statusLabel(status: string): string {
   align-items: center;
   gap: 14px;
   padding: 13px 16px;
-  transition: border-color 0.15s;
+  transition: border-color 0.18s var(--ease), transform 0.18s var(--ease-spring);
 }
 
 .history-card:hover {
   border-color: var(--border-strong);
+  transform: translateY(-2px);
 }
 
 .history-main {
@@ -338,6 +365,10 @@ function statusLabel(status: string): string {
 }
 
 @media (max-width: 560px) {
+  .stats-strip {
+    grid-template-columns: 1fr;
+  }
+
   .history-card {
     flex-direction: column;
     align-items: stretch;

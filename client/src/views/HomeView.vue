@@ -250,13 +250,20 @@ function fmtDuration(seconds?: number): string {
   <div class="home-view">
     <!-- Hero 区域 -->
     <section class="hero">
+      <span class="hero-badge">
+        <Icon name="sparkles" :size="13" />
+        AI 驱动 · 支持 1800+ 站点
+      </span>
+      <div class="hero-mark" aria-hidden="true">
+        <Icon name="play" :size="24" />
+      </div>
       <h1 class="hero-title">全网视频，<span class="hero-grad">一触即取</span></h1>
       <p class="hero-sub">粘贴短视频分享文案或链接，解析画质，高速下载</p>
 
-      <!-- 解析输入框 -->
+      <!-- 解析输入 · 大玻璃面板 -->
       <div class="beam" :class="{ probing: store.v2Probing }">
-        <div class="beam-inner">
-          <Icon class="beam-icon" name="link" :size="18" />
+        <div class="beam-top">
+          <span class="beam-orb"><Icon name="link" :size="17" /></span>
           <input
             v-model="store.url"
             class="beam-input"
@@ -268,19 +275,28 @@ function fmtDuration(seconds?: number): string {
             @keydown="onEnter"
             @paste="onPaste"
           />
-          <button class="btn btn-ghost btn-sm beam-paste" type="button" @click="store.pasteFromClipboard()">
-            <Icon name="clipboard" :size="13" />
-            粘贴
-          </button>
-          <button
-            class="btn btn-primary beam-go"
-            type="button"
-            :disabled="store.v2Probing || !store.url.trim()"
-            @click="store.doResolveV2()"
-          >
-            <span v-if="store.v2Probing" class="spinner" />
-            {{ store.v2Probing ? '解析中' : '解析' }}
-          </button>
+        </div>
+        <div class="beam-actions">
+          <span class="beam-hint">
+            <Icon name="sparkles" :size="13" />
+            回车快速解析 · 粘贴分享文案会自动提取链接
+          </span>
+          <div class="beam-buttons">
+            <button class="btn btn-ghost btn-sm beam-paste" type="button" @click="store.pasteFromClipboard()">
+              <Icon name="clipboard" :size="13" />
+              粘贴
+            </button>
+            <button
+              class="btn btn-primary beam-go"
+              type="button"
+              :disabled="store.v2Probing || !store.url.trim()"
+              @click="store.doResolveV2()"
+            >
+              <span v-if="store.v2Probing" class="spinner" />
+              <Icon v-else name="sparkles" :size="15" />
+              {{ store.v2Probing ? '解析中' : '解析' }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -289,11 +305,18 @@ function fmtDuration(seconds?: number): string {
         {{ store.urlError }}
       </p>
 
-      <!-- 支持站点 -->
-      <div class="sites-row">
-        <span class="sites-label">支持平台</span>
-        <span v-for="s in SITES" :key="s" class="site-chip">{{ s }}</span>
-        <span class="site-chip more">等 1800+ 站点</span>
+      <!-- 支持站点 · 跑马灯 -->
+      <div class="sites">
+        <div class="sites-head">
+          <span class="sites-label">支持平台</span>
+          <span class="sites-count">等 1800+ 站点持续增加</span>
+        </div>
+        <div class="sites-marquee">
+          <div class="sites-track">
+            <span v-for="s in SITES" :key="s" class="site-chip">{{ s }}</span>
+            <span v-for="s in SITES" :key="`dup-${s}`" class="site-chip" aria-hidden="true">{{ s }}</span>
+          </div>
+        </div>
       </div>
 
       <p v-if="store.binary && !store.binary.ytdlpOk" class="alert" style="margin-top: 18px">
@@ -560,74 +583,117 @@ function fmtDuration(seconds?: number): string {
 
 /* ---------- Hero ---------- */
 .hero {
-  padding: clamp(16px, 3.5vw, 36px) 0 4px;
+  padding: clamp(20px, 4vw, 46px) 0 6px;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
 }
 
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  box-shadow: 0 0 20px rgba(75, 227, 194, 0.12);
+}
+
+.hero-mark {
+  width: 58px;
+  height: 58px;
+  margin: 20px 0 16px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  color: var(--on-grad);
+  background: var(--grad-cta);
+  box-shadow: var(--glow-grad), 0 18px 46px rgba(101, 222, 200, 0.32);
+}
+
 .hero-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(26px, 4.8vw, 40px);
-  font-weight: 720;
-  line-height: 1.15;
-  letter-spacing: -0.035em;
+  font-size: clamp(28px, 5vw, 44px);
+  font-weight: 800;
+  line-height: 1.14;
+  letter-spacing: -0.04em;
+  text-shadow: 0 2px 24px rgba(2, 6, 18, 0.5);
 }
 
 .hero-grad {
-  background: linear-gradient(96deg, #0a84ff 12%, #5e5ce6 58%, #bf5af2 96%);
+  background: var(--grad-text);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
+  filter: drop-shadow(0 0 20px rgba(101, 222, 200, 0.28));
 }
 
 .hero-sub {
-  margin: 10px 0 22px;
+  margin: 12px 0 28px;
   color: var(--text-2);
-  font-size: 14px;
+  font-size: 14.5px;
 }
 
 .beam-error {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin: 10px 0 0;
+  margin: 12px 0 0;
   color: var(--danger);
   font-size: 12px;
   font-weight: 500;
 }
 
-/* ---------- 解析输入 · 聚光搜索框 ---------- */
+/* ---------- 解析输入 · 大玻璃指令面板（站酷参考 One-Click Story 输入区） ---------- */
 .beam {
-  width: min(680px, 100%);
-  border-radius: var(--r-full);
+  width: min(720px, 100%);
+  border-radius: 22px;
   border: 1px solid var(--border-strong);
-  background: var(--surface);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 8px 24px rgba(0, 0, 0, 0.05);
+  background:
+    linear-gradient(180deg, rgba(151, 184, 255, 0.07), rgba(151, 184, 255, 0.02)),
+    rgba(8, 13, 26, 0.55);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: var(--shadow-card), 0 0 44px rgba(91, 143, 245, 0.09);
+  padding: 14px 14px 12px;
+  text-align: left;
   transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
 
 .beam:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3.5px var(--accent-glow), 0 8px 28px rgba(0, 0, 0, 0.07);
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 4px var(--accent-glow), var(--shadow-card), 0 0 48px rgba(75, 227, 194, 0.13);
 }
 
 .beam.probing {
-  border-color: var(--accent);
+  border-color: var(--accent-border);
 }
 
-.beam-inner {
+.beam-top {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px 6px 16px;
+  gap: 11px;
+  padding: 2px 4px 12px;
+  border-bottom: 1px solid var(--border);
 }
 
-.beam-icon {
-  color: var(--text-3);
+.beam-orb {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
   flex-shrink: 0;
 }
 
@@ -638,54 +704,140 @@ function fmtDuration(seconds?: number): string {
   border: none;
   outline: none;
   color: var(--text);
-  font-size: 15px;
-  padding: 8px 0;
+  font-size: 15.5px;
+  padding: 6px 0;
 }
 
 .beam-input::placeholder {
   color: var(--text-3);
 }
 
+.beam-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 11px 4px 0;
+}
+
+.beam-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.beam-hint svg {
+  color: var(--accent);
+  opacity: 0.8;
+}
+
+.beam-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .beam-paste {
   flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
 }
 
 .beam-go {
   flex-shrink: 0;
-  min-width: 92px;
+  min-width: 96px;
   border-radius: var(--r-full);
 }
 
-/* ---------- 支持站点 ---------- */
-.sites-row {
+/* ---------- 支持站点 · 跑马灯（Jitter 走马灯范式） ---------- */
+.sites {
+  width: min(780px, 100%);
+  margin-top: 30px;
+}
+
+.sites-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 18px;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .sites-label {
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
   color: var(--text-3);
-  margin-right: 2px;
+}
+
+.sites-count {
+  font-size: 11.5px;
+  font-weight: 550;
+  background: var(--grad-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.sites-marquee {
+  overflow: hidden;
+  padding: 3px 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+
+.sites-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  animation: sites-marquee 40s linear infinite;
+}
+
+.sites-marquee:hover .sites-track {
+  animation-play-state: paused;
+}
+
+@keyframes sites-marquee {
+  to {
+    transform: translateX(calc(-50% - 4px));
+  }
 }
 
 .site-chip {
-  padding: 2px 9px;
+  padding: 4px 13px;
   border-radius: var(--r-full);
-  background: var(--surface-2);
+  border: 1px solid var(--border);
+  background: rgba(3, 7, 17, 0.45);
   color: var(--text-2);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
+  transition: color 0.16s var(--ease), border-color 0.16s var(--ease);
 }
 
-.site-chip.more {
-  color: var(--text-3);
-  background: none;
+.site-chip:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sites-marquee {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .sites-track {
+    animation: none;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: auto;
+  }
 }
 
 /* ---------- 状态卡 ---------- */
@@ -764,7 +916,10 @@ function fmtDuration(seconds?: number): string {
   bottom: 10px;
   padding: 2px 8px;
   border-radius: var(--r-sm);
-  background: rgba(24, 24, 27, 0.82);
+  background: rgba(4, 10, 22, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(163, 190, 255, 0.16);
   color: #fff;
   font-size: 11.5px;
   font-weight: 600;
@@ -814,33 +969,7 @@ function fmtDuration(seconds?: number): string {
   color: var(--text-2);
 }
 
-.preset-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.preset-pill {
-  padding: 6px 13px;
-  border-radius: var(--r-full);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-2);
-  font-size: 12.5px;
-  font-weight: 500;
-  transition: all 0.15s;
-}
-
-.preset-pill:hover {
-  color: var(--text);
-  border-color: var(--border-strong);
-}
-
-.preset-pill.active {
-  color: #fff;
-  background: var(--accent);
-  border-color: var(--accent);
-}
+/* 画质规格选择使用全局 .preset-pills（Segmented 范式） */
 
 /* ---------- 即时下载进度 ---------- */
 .dl-progress {
@@ -871,20 +1000,7 @@ function fmtDuration(seconds?: number): string {
   flex-shrink: 0;
 }
 
-.pbar {
-  height: 8px;
-  border-radius: var(--r-full);
-  background: var(--surface-2);
-  overflow: hidden;
-}
-
-.pbar i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accent);
-  transition: width 0.25s ease;
-}
+/* 进度条使用全局 .pbar（渐变填充 + 辉光） */
 
 .dl-foot {
   display: flex;
@@ -932,6 +1048,11 @@ function fmtDuration(seconds?: number): string {
   align-items: center;
   gap: 7px;
   color: var(--text);
+}
+
+.queue-title svg {
+  color: var(--accent);
+  filter: drop-shadow(0 0 8px rgba(75, 227, 194, 0.5));
 }
 
 .queue-counter {
@@ -1006,7 +1127,8 @@ function fmtDuration(seconds?: number): string {
 }
 
 .group-dot.live {
-  background: var(--blue);
+  background: var(--accent);
+  box-shadow: 0 0 10px rgba(75, 227, 194, 0.7);
   animation: pulse-dot 1.4s ease-in-out infinite;
 }
 
@@ -1023,15 +1145,25 @@ function fmtDuration(seconds?: number): string {
   align-items: center;
   gap: 14px;
   padding: 12px 16px;
-  transition: border-color 0.15s;
+  transition: border-color 0.18s var(--ease), transform 0.18s var(--ease-spring), box-shadow 0.18s var(--ease);
 }
 
 .task-card:hover {
   border-color: var(--border-strong);
+  transform: translateY(-2px);
 }
 
 .task-card.dim {
-  opacity: 0.85;
+  opacity: 0.82;
+}
+
+/* 进行中的任务：极光青渐变染色（站酷参考统计卡氛围） */
+.task-card.active-card {
+  border-color: rgba(75, 227, 194, 0.26);
+  background:
+    linear-gradient(180deg, rgba(75, 227, 194, 0.08), rgba(75, 227, 194, 0) 48%),
+    linear-gradient(180deg, rgba(151, 184, 255, 0.05), rgba(151, 184, 255, 0.015) 42%),
+    rgba(11, 17, 33, 0.6);
 }
 
 .task-thumb {
@@ -1092,8 +1224,8 @@ function fmtDuration(seconds?: number): string {
 }
 
 .task-percent {
-  color: var(--text);
-  font-weight: 700;
+  color: var(--accent);
+  font-weight: 750;
 }
 
 .task-error {
