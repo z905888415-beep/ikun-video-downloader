@@ -64,6 +64,16 @@ const imagineCfg = loadImageGenConfig()
 imagineApiUrl.value = imagineCfg.apiUrl
 imagineApiKey.value = imagineCfg.apiKey
 imagineModel.value = imagineCfg.model
+const imagineApiOpen = ref(!imagineApiKey.value)
+
+const imagineSizes = [
+  { id: '1024x1024', ratio: '1:1', w: 22, h: 22 },
+  { id: '1536x864', ratio: '16:9', w: 28, h: 16 },
+  { id: '864x1536', ratio: '9:16', w: 16, h: 28 },
+  { id: '1536x1024', ratio: '3:2', w: 27, h: 18 },
+  { id: '1024x1536', ratio: '2:3', w: 18, h: 27 }
+] as const
+const imagineResolutions = ['1K', '2K', '4K'] as const
 
 const maxGifStart = computed(() => Math.max(0, videoDuration.value - 0.5))
 const maxGifDuration = computed(() => Math.min(30, Math.max(0.5, videoDuration.value ? videoDuration.value - gifStart.value : 30)))
@@ -675,57 +685,96 @@ async function runPdf(): Promise<void> {
     </label>
 
     <!-- AI 生图 -->
-    <section v-if="mode === 'imagine'" class="card card-pad tool-panel rise-in">
-      <h3 class="card-title">AI 生图 · GPT-Image-2</h3>
-      <label class="field" style="margin-top: 14px">
-        <span>描述画面</span>
-        <textarea
-          v-model="imaginePrompt"
-          class="textarea"
-          rows="4"
-          maxlength="4000"
-          placeholder="例如：清晨薄雾中的未来主义建筑，冷灰色混凝土与发光玻璃，电影感构图…"
-        />
-      </label>
-      <div class="tool-grid">
-        <label class="field" style="margin-bottom: 0">
-          <span>尺寸</span>
-          <select v-model="imagineSize" class="select">
-            <option value="1024x1024">1:1 · 1024×1024</option>
-            <option value="1536x864">16:9 · 1536×864</option>
-            <option value="864x1536">9:16 · 864×1536</option>
-            <option value="1536x1024">3:2 · 1536×1024</option>
-            <option value="1024x1536">2:3 · 1024×1536</option>
-          </select>
-        </label>
-        <label class="field" style="margin-bottom: 0">
-          <span>分辨率</span>
-          <select v-model="imagineResolution" class="select">
-            <option value="1K">1K</option>
-            <option value="2K">2K</option>
-            <option value="4K">4K</option>
-          </select>
-        </label>
+    <section v-if="mode === 'imagine'" class="card card-pad tool-panel imagine-panel rise-in">
+      <div class="imagine-head">
+        <h3 class="card-title">AI 生图</h3>
+        <span class="imagine-mode-tag">{{ imagineRefUrl ? '图生图' : '文生图' }} · {{ imagineResolution }}</span>
       </div>
-      <label class="imagine-drop" @dragover.prevent @drop.prevent="dropImagine">
+
+      <textarea
+        v-model="imaginePrompt"
+        class="imagine-prompt"
+        maxlength="4000"
+        aria-label="描述画面"
+        placeholder="描述你想创造的画面…"
+      />
+
+      <div class="imagine-row">
+        <span class="imagine-label">画幅</span>
+        <div class="imagine-sizes" role="radiogroup" aria-label="画幅">
+          <button
+            v-for="s in imagineSizes"
+            :key="s.id"
+            class="imagine-size"
+            :class="{ active: imagineSize === s.id }"
+            type="button"
+            role="radio"
+            :aria-checked="imagineSize === s.id"
+            @click="imagineSize = s.id"
+          >
+            <i class="imagine-size-box" :style="{ width: s.w + 'px', height: s.h + 'px' }" />
+            {{ s.ratio }}
+          </button>
+        </div>
+      </div>
+
+      <div class="imagine-row">
+        <span class="imagine-label">清晰度</span>
+        <div class="preset-pills">
+          <button
+            v-for="r in imagineResolutions"
+            :key="r"
+            class="preset-pill"
+            :class="{ active: imagineResolution === r }"
+            type="button"
+            @click="imagineResolution = r"
+          >
+            {{ r }}
+          </button>
+        </div>
+      </div>
+
+      <label class="imagine-drop" :class="{ filled: !!imagineRefUrl }" @dragover.prevent @drop.prevent="dropImagine">
         <input type="file" accept="image/jpeg,image/png,image/webp" @change="pickImagine" />
         <template v-if="imagineRefUrl">
           <img :src="imagineRefUrl" alt="参考图" />
-          <span>{{ imagineRefName }} · 点击或拖拽可替换</span>
+          <div class="imagine-drop-copy">
+            <strong>{{ imagineRefName }}</strong>
+            <small>点击或拖拽替换</small>
+          </div>
           <button class="btn btn-ghost btn-sm" type="button" @click.stop.prevent="clearImagineRef">移除</button>
         </template>
         <template v-else>
-          <strong>可选参考图</strong>
-          <small>拖拽或点击上传，将走图生图</small>
+          <span class="imagine-drop-plus"><Icon name="plus" :size="18" /></span>
+          <div class="imagine-drop-copy">
+            <strong>添加参考图</strong>
+            <small>可选 · 拖拽或点击，走图生图</small>
+          </div>
         </template>
       </label>
-      <div class="tool-grid">
+
+      <div class="imagine-actions">
+        <button class="btn btn-primary" type="button" :disabled="busy || !imaginePrompt.trim()" @click="runImagine">
+          <Icon name="sparkles" :size="15" />
+          {{ busy ? '生成中' : '生成图片' }}
+        </button>
+        <button v-if="busy" class="btn btn-ghost" type="button" @click="imagineAbort?.abort()">取消</button>
+        <button v-if="imagineResultUrl" class="btn btn-light" type="button" @click="downloadImagine">
+          <Icon name="download" :size="15" />下载
+        </button>
+        <button class="btn btn-ghost imagine-cfg-toggle" type="button" @click="imagineApiOpen = !imagineApiOpen">
+          API 设置
+          <Icon name="chevronDown" :size="14" :class="{ rotated: imagineApiOpen }" />
+        </button>
+      </div>
+
+      <div v-if="imagineApiOpen" class="imagine-cfg">
         <label class="field" style="margin-bottom: 0">
           <span>API 地址</span>
           <input v-model="imagineApiUrl" class="input" type="url" placeholder="https://api.apimart.ai" @change="persistImagineCfg" />
         </label>
         <label class="field" style="margin-bottom: 0">
-          <span>API 密钥</span>
+          <span>密钥</span>
           <input v-model="imagineApiKey" class="input" type="password" placeholder="sk-…" autocomplete="off" @change="persistImagineCfg" />
         </label>
         <label class="field" style="margin-bottom: 0">
@@ -733,15 +782,7 @@ async function runPdf(): Promise<void> {
           <input v-model="imagineModel" class="input" type="text" placeholder="gpt-image-2" @change="persistImagineCfg" />
         </label>
       </div>
-      <div class="tool-actions">
-        <button class="btn btn-primary" type="button" :disabled="busy || !imaginePrompt.trim()" @click="runImagine">
-          <Icon name="sparkles" :size="15" />生成图片
-        </button>
-        <button class="btn btn-ghost" type="button" :disabled="!busy" @click="imagineAbort?.abort()">取消</button>
-        <button class="btn btn-light" type="button" :disabled="!imagineResultUrl" @click="downloadImagine">
-          <Icon name="download" :size="15" />下载图片
-        </button>
-      </div>
+
       <div v-if="imagineResultUrl" class="imagine-result">
         <img :src="imagineResultUrl" alt="生成结果" />
       </div>
@@ -1199,6 +1240,14 @@ async function runPdf(): Promise<void> {
   .bento {
     grid-template-columns: 1fr 1fr;
   }
+
+  .imagine-cfg {
+    grid-template-columns: 1fr;
+  }
+
+  .imagine-cfg-toggle {
+    margin-left: 0;
+  }
 }
 
 @media (max-width: 480px) {
@@ -1219,12 +1268,137 @@ async function runPdf(): Promise<void> {
   font-size: 12px;
 }
 
+.imagine-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.imagine-mode-tag {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.imagine-prompt {
+  width: 100%;
+  min-height: 132px;
+  resize: vertical;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-input);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.65;
+  box-shadow: inset 0 1px 3px rgba(1, 3, 9, 0.35);
+}
+
+.imagine-prompt::placeholder {
+  color: var(--text-3);
+}
+
+.imagine-prompt:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3.5px var(--accent-glow);
+}
+
+.imagine-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.imagine-label {
+  width: 48px;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-3);
+}
+
+.imagine-sizes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.imagine-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 12px 6px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(3, 7, 17, 0.4);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.imagine-size:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.imagine-size.active {
+  color: #fff;
+  border-color: transparent;
+  background: var(--grad-cta);
+  box-shadow: 0 4px 16px rgba(46, 107, 246, 0.35);
+}
+
+.imagine-size-box {
+  display: block;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.imagine-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.imagine-cfg-toggle {
+  margin-left: auto;
+}
+
+.imagine-cfg-toggle svg {
+  transition: transform 0.2s var(--ease);
+}
+
+.imagine-cfg-toggle svg.rotated {
+  transform: rotate(180deg);
+}
+
+.imagine-cfg {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 0.8fr;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
 .imagine-drop {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 14px;
-  padding: 12px 14px;
+  margin-top: 16px;
+  min-height: 72px;
+  padding: 12px 16px;
   border: 1.5px dashed var(--border-strong);
   border-radius: var(--r-md);
   background: rgba(11, 17, 33, 0.4);
@@ -1236,8 +1410,22 @@ async function runPdf(): Promise<void> {
   display: none;
 }
 
-.imagine-drop:hover {
-  border-color: var(--accent);
+.imagine-drop:hover,
+.imagine-drop.filled {
+  border-color: var(--accent-border);
+  background: rgba(62, 123, 250, 0.05);
+}
+
+.imagine-drop-plus {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--accent-hover);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  flex-shrink: 0;
 }
 
 .imagine-drop img {
@@ -1248,13 +1436,18 @@ async function runPdf(): Promise<void> {
   flex-shrink: 0;
 }
 
-.imagine-drop strong,
-.imagine-drop span {
-  display: block;
-  font-size: 13px;
+.imagine-drop-copy {
+  flex: 1;
+  min-width: 0;
 }
 
-.imagine-drop small {
+.imagine-drop-copy strong {
+  display: block;
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.imagine-drop-copy small {
   color: var(--text-3);
   font-size: 12px;
 }

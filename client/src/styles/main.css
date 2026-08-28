@@ -792,8 +792,8 @@ code {
 }
 
 .select option {
-  background: var(--surface-solid);
-  color: var(--text);
+  background: #0d1420;
+  color: #eef3ff;
 }
 
 /* ---------- Switch 开关 ---------- */
