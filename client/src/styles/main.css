@@ -258,12 +258,6 @@ code {
   background: rgba(13, 20, 32, 0.72);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.nav-links::-webkit-scrollbar {
-  display: none;
 }
 
 .nav-link {
@@ -314,6 +308,7 @@ code {
 }
 
 .nav-more > button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -489,6 +484,7 @@ code {
 }
 
 .tabmore-pop {
+  display: none;
   position: fixed;
   right: 12px;
   bottom: calc(64px + env(safe-area-inset-bottom, 0px));
@@ -501,8 +497,13 @@ code {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   box-shadow: var(--shadow-pop);
-  display: flex;
   flex-direction: column;
+}
+
+@media (max-width: 860px) {
+  .tabmore-pop {
+    display: flex;
+  }
 }
 
 .tabmore-pop button {
