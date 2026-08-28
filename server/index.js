@@ -71,6 +71,7 @@ const app = express()
 app.set('trust proxy', TRUST_PROXY ? 1 : false)
 app.disable('x-powered-by')
 app.use(cors({ origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map((item) => item.trim()).filter(Boolean) : true, methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'] }))
+app.use('/api/ai/images', express.json({ limit: '12mb' }))
 app.use(express.json({ limit: '1mb' }))
 
 const settingsStore = createSettingsStore()
@@ -81,6 +82,7 @@ const composed = composeApp({ settings: settingsStore.get() })
 const resolveRateLimit = createRateLimiter({ windowMs: 60_000, max: positiveInteger(process.env.RESOLVE_RATE_LIMIT, 20), message: '解析请求过于频繁，请稍后再试' })
 const downloadRateLimit = createRateLimiter({ windowMs: 60_000, max: positiveInteger(process.env.DOWNLOAD_RATE_LIMIT, 10), message: '下载任务创建过于频繁，请稍后再试' })
 const aiRateLimit = createRateLimiter({ windowMs: 60_000, max: positiveInteger(process.env.AI_RATE_LIMIT, 5), message: 'AI 图片处理请求过于频繁，请稍后再试' })
+const imageTaskRateLimit = createRateLimiter({ windowMs: 60_000, max: 45, message: '生图进度查询过于频繁，请稍后再试' })
 const assetRateLimit = createRateLimiter({ windowMs: 60_000, max: positiveInteger(process.env.ASSET_RATE_LIMIT, 60), message: '媒体访问过于频繁，请稍后再试' })
 app.use('/api/v2', createApiV2Router({ ...composed, rateLimits: { resolve: resolveRateLimit, download: downloadRateLimit, asset: assetRateLimit }, isAdmin: isAdminRequest }))
 
@@ -289,6 +291,106 @@ app.post('/api/ai/remove-background', aiRateLimit, async (req, res) => {
     }
     console.error('[ai/remove-background]', error)
     res.status(502).json({ error: error.message || 'AI 代理失败', code: 'AI_PROXY_ERROR' })
+  }
+})
+
+function assertPublicHttpsApi(raw) {
+  let parsed
+  try {
+    parsed = new URL(String(raw || ''))
+  } catch {
+    throw Object.assign(new Error('API 地址无效'), { status: 400 })
+  }
+  if (parsed.protocol !== 'https:') throw Object.assign(new Error('API 地址必须是 https'), { status: 400 })
+  const host = parsed.hostname.toLowerCase()
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') {
+    throw Object.assign(new Error('不允许指向本机地址'), { status: 400 })
+  }
+  if (/^(10\.|192\.168\.|127\.|169\.254\.)/.test(host) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) {
+    throw Object.assign(new Error('不允许指向内网地址'), { status: 400 })
+  }
+  parsed.pathname = parsed.pathname.replace(/\/+$/, '')
+  return parsed.origin
+}
+
+async function proxyImageApi(url, { method = 'GET', headers = {}, body, timeoutMs = 60000, signal }) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  if (signal) {
+    if (signal.aborted) controller.abort()
+    else signal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+  try {
+    return await fetch(url, { method, headers, body, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// 浏览器 → iKun → 用户配置的 GPT-Image 中转（默认 apimart.ai），避免跨域
+app.post('/api/ai/images/generations', aiRateLimit, async (req, res) => {
+  try {
+    const apiUrl = assertPublicHttpsApi(req.body?.apiUrl || 'https://api.apimart.ai')
+    const apiKey = String(req.body?.apiKey || req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim()
+    if (!apiKey) return res.status(400).json({ error: '缺少 API 密钥' })
+    const prompt = String(req.body?.prompt || '').trim()
+    if (!prompt) return res.status(400).json({ error: '请填写提示词' })
+    const payload = {
+      model: String(req.body?.model || 'gpt-image-2').slice(0, 80),
+      prompt: prompt.slice(0, 4000),
+      n: 1,
+      size: String(req.body?.size || '1024x1024'),
+      resolution: String(req.body?.resolution || '2K')
+    }
+    if (Array.isArray(req.body?.image_urls) && req.body.image_urls[0]) {
+      payload.image_urls = [String(req.body.image_urls[0]).slice(0, 12_000_000)]
+    }
+    const upstream = await proxyImageApi(`${apiUrl}/v1/images/generations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+      body: JSON.stringify(payload),
+      timeoutMs: 120000
+    })
+    const text = await upstream.text()
+    let data = {}
+    try {
+      data = JSON.parse(text)
+    } catch {
+      data = { error: text.slice(0, 200) || `上游错误（${upstream.status}）` }
+    }
+    res.status(upstream.ok ? 200 : upstream.status).json(data)
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message })
+    if (error.name === 'AbortError') return res.status(504).json({ error: '生图请求超时' })
+    console.error('[ai/images/generations]', error)
+    res.status(502).json({ error: error.message || '生图代理失败' })
+  }
+})
+
+app.get('/api/ai/images/tasks', imageTaskRateLimit, async (req, res) => {
+  try {
+    const apiUrl = assertPublicHttpsApi(req.query.apiUrl || 'https://api.apimart.ai')
+    const taskId = String(req.query.taskId || '').replace(/[^a-zA-Z0-9._-]/g, '')
+    const apiKey = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim()
+    if (!taskId) return res.status(400).json({ error: '缺少 taskId' })
+    if (!apiKey) return res.status(400).json({ error: '缺少 API 密钥' })
+    const upstream = await proxyImageApi(`${apiUrl}/v1/tasks/${encodeURIComponent(taskId)}`, {
+      headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+      timeoutMs: 30000
+    })
+    const text = await upstream.text()
+    let data = {}
+    try {
+      data = JSON.parse(text)
+    } catch {
+      data = { error: text.slice(0, 200) || `上游错误（${upstream.status}）` }
+    }
+    res.status(upstream.ok ? 200 : upstream.status).json(data)
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message })
+    if (error.name === 'AbortError') return res.status(504).json({ error: '查询任务超时' })
+    console.error('[ai/images/tasks]', error)
+    res.status(502).json({ error: error.message || '任务查询失败' })
   }
 })
 

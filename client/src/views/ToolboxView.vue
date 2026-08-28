@@ -8,11 +8,12 @@ import { jsPDF } from 'jspdf'
 import { Archive, ArchiveCompression, ArchiveFormat } from 'libarchive.js/dist/libarchive.js'
 import Icon from '../components/Icon.vue'
 import { api } from '../api/client'
+import { generateImage, loadImageGenConfig, saveImageGenConfig } from '../lib/image-generate'
 
-type ToolMode = 'cutout' | 'archive' | 'video' | 'gif' | 'image' | 'pdf'
+type ToolMode = 'imagine' | 'cutout' | 'archive' | 'video' | 'gif' | 'image' | 'pdf'
 type Preset = 'quality' | 'balanced' | 'tiny'
 
-const mode = ref<ToolMode>('archive')
+const mode = ref<ToolMode>('imagine')
 const files = ref<File[]>([])
 const busy = ref(false)
 const progress = ref(0)
@@ -48,6 +49,21 @@ const cutoutSourceUrl = ref('')
 const cutoutBlob = ref<Blob | null>(null)
 const cutoutName = ref('cutout.png')
 const aiStatusText = ref('')
+const imaginePrompt = ref('')
+const imagineSize = ref('1024x1024')
+const imagineResolution = ref('2K')
+const imagineApiUrl = ref('')
+const imagineApiKey = ref('')
+const imagineModel = ref('gpt-image-2')
+const imagineResultUrl = ref('')
+const imagineRefName = ref('')
+const imagineRefUrl = ref('')
+let imagineAbort: AbortController | null = null
+
+const imagineCfg = loadImageGenConfig()
+imagineApiUrl.value = imagineCfg.apiUrl
+imagineApiKey.value = imagineCfg.apiKey
+imagineModel.value = imagineCfg.model
 
 const maxGifStart = computed(() => Math.max(0, videoDuration.value - 0.5))
 const maxGifDuration = computed(() => Math.min(30, Math.max(0.5, videoDuration.value ? videoDuration.value - gifStart.value : 30)))
@@ -58,7 +74,8 @@ let ffmpeg: FFmpeg | null = null
 let archiveReady = false
 
 const tabs = [
-  { id: 'cutout' as const, title: 'AI 抠图', sub: '远程 miaoCut · 透明 PNG', icon: 'sparkles', wide: true },
+  { id: 'imagine' as const, title: 'AI 生图', sub: 'GPT-Image-2 · 文生图 / 图生图', icon: 'sparkles', wide: true },
+  { id: 'cutout' as const, title: 'AI 抠图', sub: '远程 miaoCut · 透明 PNG', icon: 'image', wide: true },
   { id: 'archive' as const, title: '压缩包', sub: 'zip / 7z / rar / tar.gz', icon: 'archive', wide: true },
   { id: 'video' as const, title: '视频压缩', sub: 'ffmpeg.wasm 本地处理', icon: 'video', wide: false },
   { id: 'gif' as const, title: '视频转 GIF', sub: '裁剪时长 / 帧率 / 宽度', icon: 'play', wide: false },
@@ -308,10 +325,109 @@ watch([cropX, cropY, cropW, cropH, gifWidth, captionText, captionSize, captionCo
   window.setTimeout(drawPreview, 80)
 })
 
+function persistImagineCfg(): void {
+  saveImageGenConfig({
+    apiUrl: imagineApiUrl.value,
+    apiKey: imagineApiKey.value,
+    model: imagineModel.value
+  })
+}
+
+function clearImagineRef(): void {
+  if (imagineRefUrl.value) URL.revokeObjectURL(imagineRefUrl.value)
+  imagineRefUrl.value = ''
+  imagineRefName.value = ''
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('读取参考图失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function onImagineRef(file?: File | null): void {
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    message.value = '请选择图片作为参考图'
+    return
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    message.value = '参考图不能超过 10MB'
+    return
+  }
+  if (imagineRefUrl.value) URL.revokeObjectURL(imagineRefUrl.value)
+  imagineRefUrl.value = URL.createObjectURL(file)
+  imagineRefName.value = file.name
+}
+
+function dropImagine(e: DragEvent): void {
+  onImagineRef(e.dataTransfer?.files?.[0])
+}
+
+function pickImagine(e: Event): void {
+  onImagineRef((e.target as HTMLInputElement).files?.[0])
+}
+
+function downloadImagine(): void {
+  if (!imagineResultUrl.value) return
+  const a = document.createElement('a')
+  a.href = imagineResultUrl.value
+  a.download = `ikun-${Date.now()}.png`
+  a.rel = 'noopener'
+  a.click()
+}
+
+async function runImagine(): Promise<void> {
+  persistImagineCfg()
+  imagineAbort?.abort()
+  imagineAbort = new AbortController()
+  busy.value = true
+  progress.value = 4
+  message.value = '正在提交生图任务…'
+  imagineResultUrl.value = ''
+  try {
+    let imageDataUrl = ''
+    if (imagineRefUrl.value) {
+      const blob = await fetch(imagineRefUrl.value).then((r) => r.blob())
+      const file = new File([blob], imagineRefName.value || 'ref.png', { type: blob.type || 'image/png' })
+      imageDataUrl = await fileToDataUrl(file)
+    }
+    const url = await generateImage({
+      prompt: imaginePrompt.value,
+      size: imagineSize.value,
+      resolution: imagineResolution.value,
+      imageDataUrl: imageDataUrl || undefined,
+      signal: imagineAbort.signal,
+      onProgress: (p) => {
+        progress.value = p
+        message.value = p >= 100 ? '生成完成' : `生成中 ${Math.round(p)}%`
+      }
+    })
+    imagineResultUrl.value = url
+    progress.value = 100
+    message.value = '生成完成'
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      message.value = '已取消'
+    } else {
+      message.value = error instanceof Error ? error.message : String(error)
+      progress.value = 0
+    }
+  } finally {
+    busy.value = false
+    imagineAbort = null
+  }
+}
+
 onBeforeUnmount(() => {
+  imagineAbort?.abort()
   if (cutoutPreviewUrl.value) URL.revokeObjectURL(cutoutPreviewUrl.value)
   if (cutoutSourceUrl.value) URL.revokeObjectURL(cutoutSourceUrl.value)
   if (videoObjectUrl.value) URL.revokeObjectURL(videoObjectUrl.value)
+  if (imagineRefUrl.value) URL.revokeObjectURL(imagineRefUrl.value)
 })
 
 async function videoToGif(): Promise<void> {
@@ -515,7 +631,7 @@ async function runPdf(): Promise<void> {
   <div class="toolbox-view">
     <div class="page-head">
       <h2>工具箱</h2>
-      <p>本地工具在浏览器内处理；AI 抠图经本机服务转发到远程 miaoCut，不经过你的业务存储。</p>
+      <p>本地工具在浏览器内处理；AI 生图走你自己的中转 API；抠图经本机转发到远程 miaoCut。</p>
     </div>
 
     <!-- Bento 工具网格 -->
@@ -537,8 +653,8 @@ async function runPdf(): Promise<void> {
       </button>
     </div>
 
-    <!-- 文件拖拽区 -->
-    <label class="drop-card" :class="{ filled: files.length }" @dragover.prevent @drop.prevent="drop">
+    <!-- 文件拖拽区（生图工具用自己的参考图槽，不走通用拖拽） -->
+    <label v-if="mode !== 'imagine'" class="drop-card" :class="{ filled: files.length }" @dragover.prevent @drop.prevent="drop">
       <input
         :multiple="mode !== 'cutout'"
         type="file"
@@ -558,8 +674,81 @@ async function runPdf(): Promise<void> {
       </small>
     </label>
 
+    <!-- AI 生图 -->
+    <section v-if="mode === 'imagine'" class="card card-pad tool-panel rise-in">
+      <h3 class="card-title">AI 生图 · GPT-Image-2</h3>
+      <label class="field" style="margin-top: 14px">
+        <span>描述画面</span>
+        <textarea
+          v-model="imaginePrompt"
+          class="textarea"
+          rows="4"
+          maxlength="4000"
+          placeholder="例如：清晨薄雾中的未来主义建筑，冷灰色混凝土与发光玻璃，电影感构图…"
+        />
+      </label>
+      <div class="tool-grid">
+        <label class="field" style="margin-bottom: 0">
+          <span>尺寸</span>
+          <select v-model="imagineSize" class="select">
+            <option value="1024x1024">1:1 · 1024×1024</option>
+            <option value="1536x864">16:9 · 1536×864</option>
+            <option value="864x1536">9:16 · 864×1536</option>
+            <option value="1536x1024">3:2 · 1536×1024</option>
+            <option value="1024x1536">2:3 · 1024×1536</option>
+          </select>
+        </label>
+        <label class="field" style="margin-bottom: 0">
+          <span>分辨率</span>
+          <select v-model="imagineResolution" class="select">
+            <option value="1K">1K</option>
+            <option value="2K">2K</option>
+            <option value="4K">4K</option>
+          </select>
+        </label>
+      </div>
+      <label class="imagine-drop" @dragover.prevent @drop.prevent="dropImagine">
+        <input type="file" accept="image/jpeg,image/png,image/webp" @change="pickImagine" />
+        <template v-if="imagineRefUrl">
+          <img :src="imagineRefUrl" alt="参考图" />
+          <span>{{ imagineRefName }} · 点击或拖拽可替换</span>
+          <button class="btn btn-ghost btn-sm" type="button" @click.stop.prevent="clearImagineRef">移除</button>
+        </template>
+        <template v-else>
+          <strong>可选参考图</strong>
+          <small>拖拽或点击上传，将走图生图</small>
+        </template>
+      </label>
+      <div class="tool-grid">
+        <label class="field" style="margin-bottom: 0">
+          <span>API 地址</span>
+          <input v-model="imagineApiUrl" class="input" type="url" placeholder="https://api.apimart.ai" @change="persistImagineCfg" />
+        </label>
+        <label class="field" style="margin-bottom: 0">
+          <span>API 密钥</span>
+          <input v-model="imagineApiKey" class="input" type="password" placeholder="sk-…" autocomplete="off" @change="persistImagineCfg" />
+        </label>
+        <label class="field" style="margin-bottom: 0">
+          <span>模型</span>
+          <input v-model="imagineModel" class="input" type="text" placeholder="gpt-image-2" @change="persistImagineCfg" />
+        </label>
+      </div>
+      <div class="tool-actions">
+        <button class="btn btn-primary" type="button" :disabled="busy || !imaginePrompt.trim()" @click="runImagine">
+          <Icon name="sparkles" :size="15" />生成图片
+        </button>
+        <button class="btn btn-ghost" type="button" :disabled="!busy" @click="imagineAbort?.abort()">取消</button>
+        <button class="btn btn-light" type="button" :disabled="!imagineResultUrl" @click="downloadImagine">
+          <Icon name="download" :size="15" />下载图片
+        </button>
+      </div>
+      <div v-if="imagineResultUrl" class="imagine-result">
+        <img :src="imagineResultUrl" alt="生成结果" />
+      </div>
+    </section>
+
     <!-- AI 抠图 -->
-    <section v-if="mode === 'cutout'" class="card card-pad tool-panel rise-in">
+    <section v-else-if="mode === 'cutout'" class="card card-pad tool-panel rise-in">
       <h3 class="card-title">AI 抠图 · 透明 PNG</h3>
       <div class="preset-pills" style="margin-top: 14px">
         <button
@@ -1028,6 +1217,61 @@ async function runPdf(): Promise<void> {
 .tool-note code {
   color: var(--accent);
   font-size: 12px;
+}
+
+.imagine-drop {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--r-md);
+  background: rgba(11, 17, 33, 0.4);
+  cursor: pointer;
+  color: var(--text-2);
+}
+
+.imagine-drop input {
+  display: none;
+}
+
+.imagine-drop:hover {
+  border-color: var(--accent);
+}
+
+.imagine-drop img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.imagine-drop strong,
+.imagine-drop span {
+  display: block;
+  font-size: 13px;
+}
+
+.imagine-drop small {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.imagine-result {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: rgba(3, 7, 17, 0.45);
+}
+
+.imagine-result img {
+  width: 100%;
+  max-height: 640px;
+  object-fit: contain;
+  display: block;
 }
 
 .cutout-preview {
