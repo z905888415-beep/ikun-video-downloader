@@ -4,12 +4,13 @@ import { extractUrl, useAppStore } from '../stores/app'
 import Icon from '../components/Icon.vue'
 import { downloadHls } from '../lib/hls-download'
 import { downloadImagesAsZip } from '../lib/images-zip'
-import { apiV2, type V2Job } from '../api/client'
+import { apiV2, type V2Job, type V2MediaAction, type V2Resolution } from '../api/client'
 
 const store = useAppStore()
 
 const hlsBusy = ref(false)
 const zipBusy = ref(false)
+const queueExpanded = ref(false)
 
 const activeDownload = ref<{
   label: string
@@ -19,6 +20,7 @@ const activeDownload = ref<{
   actionId: string
   jobId?: string
   filename?: string
+  auto?: boolean
 } | null>(null)
 
 const STATUS_TEXT: Record<string, string> = {
@@ -77,6 +79,16 @@ function saveBlob(blob: Blob, name: string): void {
   a.download = name
   a.click()
   setTimeout(() => URL.revokeObjectURL(a.href), 30000)
+}
+
+function triggerAnchorDownload(url: string, filename: string): void {
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.style.display = 'none'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
 }
 
 async function runHlsDownload(action: { id: string; assetIds: string[]; label: string }): Promise<void> {
@@ -188,7 +200,12 @@ watch(() => store.v2Jobs, (jobs) => {
   if (job.status === 'COMPLETED' && prevStatus !== 'done') {
     dl.percent = 100
     dl.status = 'done'
-    store.setNotice('下载完成')
+    if (dl.auto && dl.jobId) {
+      triggerAnchorDownload(apiV2.fileUrl(dl.jobId), job.filename || dl.filename || 'video.mp4')
+      store.setNotice('已开始下载')
+    } else {
+      store.setNotice('下载完成')
+    }
   } else if ((job.status === 'FAILED' || job.status === 'CANCELLED') && prevStatus !== 'error') {
     dl.status = 'error'
   } else {
@@ -204,11 +221,124 @@ function onPaste(e: ClipboardEvent): void {
   const text = e.clipboardData?.getData('text') || ''
   if (!text) return
   const cleaned = extractUrl(text)
-  if (cleaned && cleaned !== text) {
-    e.preventDefault()
-    store.url = cleaned
-    store.urlError = ''
+  if (!cleaned) return
+  // 统一接管赋值（必须在 paste 事件内同步写入，供自动链路做输入变更守卫）
+  e.preventDefault()
+  store.url = cleaned
+  store.urlError = ''
+  // 单个合法 http(s) 链接才自动执行粘贴-解析-下载；多链接或纯文本仅填充输入框
+  const urlCount = (text.match(/https?:\/\/[^\s]+/gi) || []).length
+  if (urlCount === 1 && /^https?:\/\//i.test(cleaned)) {
+    void autoResolveAndDownload(cleaned)
   }
+}
+
+async function pasteFromClipboardAndGo(): Promise<void> {
+  await store.pasteFromClipboard()
+  const u = store.url.trim()
+  if (/^https?:\/\//i.test(u) && (u.match(/https?:\/\//gi) || []).length === 1) {
+    void autoResolveAndDownload(u)
+  }
+}
+
+/* ---------- 粘贴-解析-下载 自动链路 ---------- */
+
+function isDirectAction(a: V2MediaAction): boolean {
+  return a.type === 'direct' && !a.requiresProcessing
+}
+
+function actionHeight(res: V2Resolution, a: V2MediaAction): number {
+  const asset = res.assets.find((x) => x.id === a.assetIds[0])
+  if (asset?.height) return asset.height
+  const m = a.label.match(/(\d{3,4})\s*P/i)
+  return m ? Number(m[1]) : 0
+}
+
+function pickAutoAction(res: V2Resolution): V2MediaAction | null {
+  const { actions, kind } = res
+  if (!actions.length) return null
+  if (kind === 'images') {
+    return actions.find((a) => a.type === 'images-zip') || null
+  }
+  if (kind === 'audio') {
+    return actions.find((a) => a.type === 'extract-audio' || a.type === 'direct') || actions[0]
+  }
+  // 优先免处理的视频直链：先挑 ≤1080p 里最高的，否则取最高画质的直链
+  const direct = actions.filter(isDirectAction)
+  if (direct.length) {
+    const within1080 = direct.filter((a) => {
+      const h = actionHeight(res, a)
+      return h > 0 && h <= 1080
+    })
+    if (within1080.length) {
+      return within1080.reduce((best, a) => (actionHeight(res, a) > actionHeight(res, best) ? a : best))
+    }
+    const withHeight = direct.filter((a) => actionHeight(res, a) > 0)
+    if (withHeight.length) {
+      return withHeight.reduce((best, a) => (actionHeight(res, a) > actionHeight(res, best) ? a : best))
+    }
+    return direct[0]
+  }
+  return actions.find((a) => a.type === 'merge') || actions.find((a) => a.type === 'hls') || actions[0]
+}
+
+async function autoResolveAndDownload(rawUrl: string): Promise<void> {
+  if (store.v2Probing) return
+  const before = store.url
+  await store.doResolveV2(rawUrl)
+  // 解析期间用户改动了输入，或解析失败：不自动下载
+  if (store.url !== before || !store.v2Resolution) return
+  const action = pickAutoAction(store.v2Resolution)
+  if (!action) return
+  if (isDirectAction(action)) {
+    void autoSaveDirect(action)
+  } else if (action.type === 'images-zip') {
+    void runImagesZip(action)
+  } else if (action.type === 'hls') {
+    void runHlsDownload(action)
+  } else {
+    await autoStartTask(action)
+  }
+}
+
+/* Chromium 下直接弹系统保存窗口；缺少用户激活或其它浏览器回退为浏览器接管下载 */
+async function autoSaveDirect(action: V2MediaAction): Promise<void> {
+  const filename = safeFilename(store.v2Resolution?.title || 'video', action)
+  const url = apiV2.assetProxyUrl(action.assetIds[0])
+  activeDownload.value = { label: filename, kind: 'direct', percent: 0, status: 'downloading', filename, actionId: action.id, auto: true }
+  const picker = (window as { showSaveFilePicker?: (opts: { suggestedName: string }) => Promise<FileSystemFileHandle> }).showSaveFilePicker
+  if (typeof picker === 'function') {
+    try {
+      const handle = await picker.call(window, { suggestedName: filename })
+      const res = await fetch(url)
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
+      const writable = await (handle as FileSystemFileHandle).createWritable()
+      await res.body.pipeTo(writable)
+      if (activeDownload.value?.actionId === action.id) {
+        activeDownload.value.percent = 100
+        activeDownload.value.status = 'done'
+      }
+      store.setNotice('已保存')
+      return
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        activeDownload.value = null
+        return
+      }
+      // NotAllowedError（缺少用户激活）等 → 回退为浏览器接管下载
+    }
+  }
+  triggerAnchorDownload(url, filename)
+  if (activeDownload.value?.actionId === action.id) {
+    activeDownload.value.percent = 100
+    activeDownload.value.status = 'done'
+  }
+}
+
+async function autoStartTask(action: V2MediaAction): Promise<void> {
+  const job = await store.enqueueV2Action(action.id)
+  if (!job) return
+  activeDownload.value = { label: action.label, kind: 'task', percent: 0, status: 'queued', jobId: job.id, filename: job.filename, actionId: action.id, auto: true }
 }
 
 function safeFilename(title: string, action: { preferredExt?: string; assetIds: string[] }): string {
@@ -231,7 +361,7 @@ function fmtDuration(seconds?: number): string {
 <template>
   <div class="home-view">
     <!-- 中央下载面板：输入行 + 原位状态区 -->
-    <section class="hero">
+    <section class="hero" :class="{ tight: store.v2Jobs.length > 0 }">
       <div class="panel rise-in" :class="{ probing: store.v2Probing }">
         <div class="panel-input">
           <span class="panel-orb" aria-hidden="true"><Icon name="link" :size="17" /></span>
@@ -247,7 +377,7 @@ function fmtDuration(seconds?: number): string {
             @keydown="onEnter"
             @paste="onPaste"
           />
-          <button class="btn btn-ghost btn-sm panel-paste" type="button" @click="store.pasteFromClipboard()">
+          <button class="btn btn-ghost btn-sm panel-paste" type="button" @click="pasteFromClipboardAndGo()">
             <Icon name="clipboard" :size="13" />
             粘贴
           </button>
@@ -340,11 +470,14 @@ function fmtDuration(seconds?: number): string {
                 任务进度 {{ activeDownload.percent }}%
               </span>
               <span v-else-if="activeDownload.status === 'done'">
-                <template v-if="activeDownload.kind === 'task'">处理完成 · 点击「保存文件」下载到本地</template>
+                <template v-if="activeDownload.kind === 'task'">
+                  {{ activeDownload.auto ? '处理完成 · 已开始下载到你的设备' : '处理完成 · 点击「保存文件」下载到本地' }}
+                </template>
+                <template v-else-if="activeDownload.auto">已开始下载 · 保存位置由浏览器设置决定</template>
                 <template v-else>已保存到浏览器下载目录</template>
               </span>
               <span v-else-if="activeDownload.status === 'error'">下载遇到问题，请重试</span>
-              <span v-else>{{ activeDownload.percent }}%</span>
+              <span v-else>{{ activeDownload.percent > 0 ? `${activeDownload.percent}%` : '传输中…' }}</span>
               <div class="dl-actions">
                 <button v-if="activeDownload.status === 'error'" class="btn btn-sm" type="button" @click="retryActive()">
                   <Icon name="refresh" :size="13" />重试
@@ -365,27 +498,28 @@ function fmtDuration(seconds?: number): string {
       </div>
     </section>
 
-    <!-- ==================== 下载队列 ==================== -->
+    <!-- ==================== 下载队列：默认收起，点击展开 ==================== -->
     <section v-if="store.v2Jobs.length" class="queue-section rise-in">
-      <div class="queue-section-header">
-        <div class="queue-title-wrap">
-          <h2 class="queue-title">
-            <Icon name="download" :size="18" />
-            下载队列
-          </h2>
-          <span class="chip queue-counter">
-            {{ store.v2Jobs.length }} 个任务<template v-if="runningCount"> · {{ runningCount }} 进行中</template>
-          </span>
-        </div>
-        <div class="queue-header-actions">
-          <button class="btn btn-ghost btn-sm" type="button" title="刷新队列状态" @click="store.refreshV2Jobs()">
-            <Icon name="refresh" :size="13" />
-            刷新
-          </button>
-        </div>
-      </div>
+      <button class="queue-bar" type="button" :aria-expanded="queueExpanded" @click="queueExpanded = !queueExpanded">
+        <span class="queue-bar-left">
+          <Icon name="download" :size="16" />
+          <strong>下载队列</strong>
+          <span class="queue-bar-count">{{ store.v2Jobs.length }} 个任务</span>
+          <span v-if="runningCount" class="queue-bar-live">{{ runningCount }} 进行中</span>
+        </span>
+        <Icon name="chevronDown" :size="16" class="queue-bar-chevron" :class="{ open: queueExpanded }" />
+      </button>
 
-      <div class="queue-list-wrap">
+      <div class="queue-collapse" :class="{ open: queueExpanded }">
+        <div class="queue-collapse-inner">
+          <div class="queue-expanded-top">
+            <span class="queue-expanded-hint">完成或失败的任务会保留在「历史记录」</span>
+            <button class="btn btn-ghost btn-sm" type="button" title="刷新队列状态" @click="store.refreshV2Jobs()">
+              <Icon name="refresh" :size="13" />
+              刷新
+            </button>
+          </div>
+          <div class="queue-list-wrap">
         <!-- 进行中任务 -->
         <template v-if="activeTasks.length">
           <div class="group-label">
@@ -497,6 +631,8 @@ function fmtDuration(seconds?: number): string {
             </div>
           </div>
         </template>
+          </div>
+        </div>
       </div>
     </section>
   </div>
@@ -506,7 +642,7 @@ function fmtDuration(seconds?: number): string {
 .home-view {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
   padding-bottom: 24px;
 }
 
@@ -517,6 +653,11 @@ function fmtDuration(seconds?: number): string {
   align-items: center;
   /* 面板在首屏垂直居中、中心略偏上（~40%），队列仍可留在首屏内 */
   min-height: max(220px, calc(100dvh - var(--nav-h) - 280px));
+}
+
+/* 队列存在时面板略上移，让队列条贴着面板出现在首屏内 */
+.hero.tight {
+  min-height: max(160px, calc(100dvh - var(--nav-h) - 460px));
 }
 
 .panel {
@@ -850,43 +991,119 @@ function fmtDuration(seconds?: number): string {
   gap: 8px;
 }
 
-/* ---------- 下载队列 ---------- */
+/* ---------- 下载队列 · 收起/展开条 ---------- */
 .queue-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
 
-.queue-section-header {
+.queue-bar {
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 2px;
-}
-
-.queue-title-wrap {
-  display: flex;
-  align-items: center;
   gap: 10px;
+  padding: 12px 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: rgba(10, 15, 26, 0.55);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.18s var(--ease), background 0.18s var(--ease);
 }
 
-.queue-title {
-  margin: 0;
-  font-size: 15.5px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+.queue-bar:hover {
+  border-color: var(--border-strong);
+  background: rgba(13, 19, 32, 0.7);
+}
+
+.queue-bar-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
+  min-width: 0;
+  font-size: 13.5px;
   color: var(--text);
 }
 
-.queue-title svg {
+.queue-bar-left > svg {
   color: var(--text-2);
+  flex-shrink: 0;
 }
 
-.queue-counter {
+.queue-bar-left strong {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.queue-bar-count {
+  padding: 2px 9px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 550;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.queue-bar-live {
+  color: var(--accent-hover);
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.queue-bar-chevron {
+  color: var(--text-3);
+  flex-shrink: 0;
+  transition: transform 0.28s var(--ease);
+}
+
+.queue-bar-chevron.open {
+  transform: rotate(180deg);
+}
+
+.queue-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.32s var(--ease);
+}
+
+.queue-collapse.open {
+  grid-template-rows: 1fr;
+}
+
+.queue-collapse-inner {
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 0;
+  transition: padding-top 0.32s var(--ease);
+}
+
+.queue-collapse.open .queue-collapse-inner {
+  padding-top: 12px;
+}
+
+.queue-expanded-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px;
+}
+
+.queue-expanded-hint {
+  font-size: 12px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .queue-list-wrap {
