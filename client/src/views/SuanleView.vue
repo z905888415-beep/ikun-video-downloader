@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const iframe = ref<HTMLIFrameElement | null>(null)
 const frameHeight = ref(680)
-let resizeTimer: number | null = null
+let themeTimers: number[] = []
 
 const THEME_VARS: Record<string, string> = {
   '--background': '#0b1120',
@@ -30,13 +30,19 @@ function pushTheme(): void {
 function onMessage(event: MessageEvent): void {
   if (event.origin !== window.location.origin) return
   const data = event.data
-  if (!data || typeof data !== 'object' || data.type !== 'ikun:resize') return
-  const h = Number(data.height)
-  if (Number.isFinite(h) && h > 0) frameHeight.value = Math.ceil(h) + 20
+  if (!data || typeof data !== 'object') return
+  if (data.type === 'ikun:resize') {
+    // 收到 resize 说明子应用监听器已就绪，补发主题（load 时机可能早于水合完成）
+    pushTheme()
+    const h = Number(data.height)
+    if (Number.isFinite(h) && h > 0) frameHeight.value = Math.ceil(h) + 20
+  }
 }
 
 function onFrameLoad(): void {
   pushTheme()
+  themeTimers.forEach((t) => window.clearTimeout(t))
+  themeTimers = [300, 800, 1600, 3000, 5000].map((d) => window.setTimeout(pushTheme, d))
 }
 
 onMounted(() => {
@@ -45,7 +51,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('message', onMessage)
-  if (resizeTimer != null) window.clearTimeout(resizeTimer)
+  themeTimers.forEach((t) => window.clearTimeout(t))
 })
 </script>
 

@@ -28,7 +28,7 @@ const SUANLE_DIR = join(WEB_ROOT, 'suanle')
 const PORT = Number(process.env.PORT || 8787)
 const HOST = process.env.HOST || '0.0.0.0'
 const TRUST_PROXY = process.env.TRUST_PROXY === 'true'
-const WEB_VERSION = '0.3.1'
+const WEB_VERSION = '0.4.0'
 
 // miaoCut remote brain. Self-host: MIAOCUT_BASE_URL=http://127.0.0.1:8000
 const MIAOCUT_BASE_URL = String(process.env.MIAOCUT_BASE_URL || 'https://api2.miaocut.app').replace(/\/$/, '')

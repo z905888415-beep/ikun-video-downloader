@@ -65,13 +65,13 @@ function statusLabel(status: string): string {
   <div class="history-view">
     <div class="page-head">
       <h2>历史记录</h2>
-      <p>{{ historyItems.length }} 条记录，完成或失败的任务都会保留在这里</p>
+      <p>本机 {{ historyItems.length }} 条记录 · 列表仅显示当前浏览器创建的任务</p>
     </div>
 
     <!-- 缓存与容量提示 -->
     <div class="stats-strip">
       <div class="stat-cell">
-        <span class="stat-label">历史缓存</span>
+        <span class="stat-label">服务端缓存</span>
         <span class="stat-value">
           {{ store.downloadStats?.historyCount ?? historyItems.length }}/{{ store.downloadStats?.historyLimit ?? 30 }}
           <span v-if="historyFull" class="stat-warn">已满</span>
@@ -94,7 +94,7 @@ function statusLabel(status: string): string {
       </div>
     </div>
     <p class="history-hint">
-      最多保留最近 {{ store.downloadStats?.historyLimit ?? 30 }} 条历史记录，超出后最早的记录将自动清理；
+      服务端缓存为所有访客共享，最多保留最近 {{ store.downloadStats?.historyLimit ?? 30 }} 条，超出后最早的记录将自动清理；
       下载目录超过容量上限时按最旧优先自动删除任务文件（每 30 分钟检查一次）。
     </p>
 

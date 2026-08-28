@@ -57,7 +57,7 @@ onMounted(() => {
           <div class="meter"><i :style="{ width: Math.min(100, store.downloadStats?.usedPercent ?? 0) + '%' }" /></div>
           <strong>{{ formatBytes(store.downloadStats?.usedBytes ?? 0) }}/{{ formatBytes(store.downloadStats?.maxBytes ?? 0) }}</strong>
         </div>
-        <p class="hint">历史记录：{{ store.downloadStats?.historyCount ?? 0 }}/{{ store.downloadStats?.historyLimit ?? 0 }}。过期文件和超过容量的旧任务由服务器自动清理。</p>
+        <p class="hint">服务端缓存（所有访客共享）：{{ store.downloadStats?.historyCount ?? 0 }}/{{ store.downloadStats?.historyLimit ?? 0 }}。过期文件和超过容量的旧任务由服务器自动清理。</p>
       </section>
 
       <section class="card card-pad span-2">
