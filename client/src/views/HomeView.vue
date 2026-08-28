@@ -514,7 +514,9 @@ function fmtDuration(seconds?: number): string {
 .hero {
   display: flex;
   justify-content: center;
-  padding-top: clamp(28px, 8vh, 84px);
+  align-items: center;
+  /* 面板在首屏垂直居中、中心略偏上（~40%），队列仍可留在首屏内 */
+  min-height: max(220px, calc(100dvh - var(--nav-h) - 280px));
 }
 
 .panel {
@@ -1030,7 +1032,7 @@ function fmtDuration(seconds?: number): string {
 
 @media (max-width: 640px) {
   .hero {
-    padding-top: 16px;
+    min-height: max(180px, calc(100dvh - var(--nav-h) - 320px));
   }
 
   .panel-input {
