@@ -870,9 +870,9 @@ async function runPdf(): Promise<void> {
 .bento-card.active {
   border-color: var(--accent-border);
   background:
-    linear-gradient(180deg, rgba(75, 227, 194, 0.1), rgba(75, 227, 194, 0.02) 55%),
+    linear-gradient(180deg, rgba(62, 123, 250, 0.1), rgba(62, 123, 250, 0.02) 55%),
     rgba(11, 17, 33, 0.6);
-  box-shadow: 0 0 0 1px rgba(75, 227, 194, 0.12), 0 10px 30px rgba(75, 227, 194, 0.12);
+  box-shadow: 0 0 0 1px rgba(62, 123, 250, 0.12), 0 10px 30px rgba(62, 123, 250, 0.14);
 }
 
 .bento-icon {
@@ -890,7 +890,7 @@ async function runPdf(): Promise<void> {
 .bento-card.active .bento-icon {
   color: var(--on-grad);
   background: var(--grad-cta);
-  box-shadow: 0 6px 18px rgba(101, 222, 200, 0.35);
+  box-shadow: 0 6px 18px rgba(46, 107, 246, 0.4);
 }
 
 .bento-text {
@@ -926,7 +926,7 @@ async function runPdf(): Promise<void> {
   place-items: center;
   color: var(--on-grad);
   background: var(--grad-cta);
-  box-shadow: 0 4px 12px rgba(101, 222, 200, 0.4);
+  box-shadow: 0 4px 12px rgba(46, 107, 246, 0.45);
 }
 
 /* ---------- 拖拽区 · Upload 上传（虚线装备槽范式） ---------- */
@@ -946,8 +946,8 @@ async function runPdf(): Promise<void> {
 
 .drop-card:hover {
   border-color: var(--accent);
-  background: rgba(75, 227, 194, 0.05);
-  box-shadow: 0 0 32px rgba(75, 227, 194, 0.1) inset;
+  background: rgba(62, 123, 250, 0.05);
+  box-shadow: 0 0 32px rgba(62, 123, 250, 0.1) inset;
 }
 
 .drop-card input {

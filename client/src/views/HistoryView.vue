@@ -133,7 +133,7 @@ function statusLabel(status: string): string {
         <div class="history-actions">
           <a
             v-if="item.status === 'COMPLETED' && item.filepath"
-            class="btn btn-primary btn-sm"
+            class="btn btn-light btn-sm"
             :href="apiV2.fileUrl(item.id)"
             download
           >
@@ -198,8 +198,8 @@ function statusLabel(status: string): string {
   width: 3px;
   height: 11px;
   border-radius: var(--r-full);
-  background: linear-gradient(180deg, var(--lime), var(--accent));
-  box-shadow: 0 0 8px rgba(75, 227, 194, 0.55);
+  background: linear-gradient(180deg, #5b8fff, #2e6bf6);
+  box-shadow: 0 0 8px rgba(62, 123, 250, 0.55);
 }
 
 .stat-value {
@@ -244,8 +244,8 @@ function statusLabel(status: string): string {
 .meter-fill {
   height: 100%;
   border-radius: var(--r-full);
-  background: var(--grad-cta);
-  box-shadow: 0 0 10px rgba(101, 222, 200, 0.4);
+  background: linear-gradient(90deg, #5b8fff, #2e6bf6);
+  box-shadow: 0 0 10px rgba(62, 123, 250, 0.4);
   transition: width 0.4s var(--ease);
 }
 

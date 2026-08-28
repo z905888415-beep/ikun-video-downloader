@@ -10,14 +10,14 @@ const THEME_VARS: Record<string, string> = {
   '--foreground': '#eef3ff',
   '--card': '#111a2e',
   '--card-foreground': '#eef3ff',
-  '--primary': '#4be3c2',
-  '--primary-foreground': '#07182b',
+  '--primary': '#3e7bfa',
+  '--primary-foreground': '#ffffff',
   '--secondary': 'rgba(148, 180, 255, 0.1)',
   '--secondary-foreground': '#eef3ff',
   '--muted': 'rgba(148, 180, 255, 0.12)',
   '--muted-foreground': 'rgba(233, 240, 255, 0.62)',
   '--border': 'rgba(163, 190, 255, 0.14)',
-  '--ring': 'rgba(75, 227, 194, 0.4)'
+  '--ring': 'rgba(62, 123, 250, 0.45)'
 }
 
 function pushTheme(): void {

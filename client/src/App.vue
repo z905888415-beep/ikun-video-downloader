@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore, type PageId } from './stores/app'
 import Icon from './components/Icon.vue'
 import HomeView from './views/HomeView.vue'
@@ -10,16 +10,42 @@ import SettingsView from './views/SettingsView.vue'
 
 const store = useAppStore()
 
-const pages: { id: PageId; label: string; short: string; icon: string }[] = [
+const primaryPages: { id: PageId; label: string; short: string; icon: string }[] = [
   { id: 'home', label: '解析与下载', short: '解析', icon: 'sparkles' },
   { id: 'tools', label: '工具箱', short: '工具', icon: 'grid' },
-  { id: 'suanle', label: '命理', short: '命理', icon: 'moon' },
-  { id: 'history', label: '历史记录', short: '历史', icon: 'clock' },
-  { id: 'settings', label: '服务状态', short: '状态', icon: 'sliders' }
+  { id: 'history', label: '历史记录', short: '历史', icon: 'clock' }
 ]
 
+const morePages: { id: PageId; label: string; icon: string }[] = [
+  { id: 'suanle', label: '命理', icon: 'moon' },
+  { id: 'settings', label: '服务状态', icon: 'sliders' }
+]
+
+const moreOpen = ref(false)
+const moreActive = ref(false)
+
+watch(
+  () => store.page,
+  (page) => {
+    moreOpen.value = false
+    moreActive.value = page === 'suanle' || page === 'settings'
+  },
+  { immediate: true }
+)
+
+function onDocClick(e: MouseEvent): void {
+  if (!moreOpen.value) return
+  const target = e.target as Element | null
+  if (!target?.closest('.nav-more')) moreOpen.value = false
+}
+
 onMounted(() => {
+  document.addEventListener('click', onDocClick)
   void store.init()
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClick)
 })
 </script>
 
@@ -28,9 +54,9 @@ onMounted(() => {
     <header class="topnav">
       <button class="brand" type="button" @click="store.page = 'home'">
         <span class="brand-mark" aria-hidden="true">
-          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-            <circle cx="11" cy="11" r="8.5" stroke="currentColor" stroke-width="2" />
-            <line x1="3.5" y1="18.5" x2="18.5" y2="3.5" stroke="currentColor" stroke-width="2" />
+          <svg width="18" height="18" viewBox="0 0 22 22" fill="none">
+            <circle cx="11" cy="11" r="8.5" stroke="currentColor" stroke-width="2.4" />
+            <line x1="3.5" y1="18.5" x2="18.5" y2="3.5" stroke="currentColor" stroke-width="2.4" />
           </svg>
         </span>
         <span class="brand-name">iKun</span>
@@ -39,19 +65,46 @@ onMounted(() => {
 
       <nav class="nav-links" aria-label="主导航">
         <button
-          v-for="p in pages"
+          v-for="p in primaryPages"
           :key="p.id"
           class="nav-link"
           :class="{ active: store.page === p.id }"
           type="button"
           @click="store.page = p.id"
         >
-          <Icon :name="p.icon" :size="15" />
           {{ p.label }}
           <span v-if="p.id === 'home' && store.v2RunningCount" class="nav-badge">
             {{ store.v2RunningCount }}
           </span>
         </button>
+
+        <div class="nav-more" :class="{ open: moreOpen }">
+          <button
+            type="button"
+            :aria-haspopup="true"
+            :aria-expanded="moreOpen"
+            @click.stop="moreOpen = !moreOpen"
+          >
+            更多
+            <Icon name="chevronDown" :size="13" />
+            <span v-if="moreActive" class="nav-more-dot" />
+          </button>
+          <Transition name="nav-menu">
+            <div v-if="moreOpen" class="nav-menu" role="menu">
+              <button
+                v-for="p in morePages"
+                :key="p.id"
+                type="button"
+                role="menuitem"
+                :class="{ active: store.page === p.id }"
+                @click="store.page = p.id"
+              >
+                <Icon :name="p.icon" :size="15" />
+                {{ p.label }}
+              </button>
+            </div>
+          </Transition>
+        </div>
       </nav>
 
       <div class="topnav-right">
@@ -84,7 +137,7 @@ onMounted(() => {
 
     <nav class="tabbar" aria-label="移动端导航">
       <button
-        v-for="p in pages"
+        v-for="p in primaryPages"
         :key="p.id"
         class="tab"
         :class="{ active: store.page === p.id }"
@@ -97,7 +150,27 @@ onMounted(() => {
         <Icon :name="(p.icon as any)" :size="19" />
         <span>{{ p.short }}</span>
       </button>
+      <button class="tab" :class="{ active: moreActive }" type="button" @click="moreOpen = !moreOpen">
+        <Icon :name="moreOpen ? 'x' : 'list'" :size="19" />
+        <span>更多</span>
+      </button>
     </nav>
+
+    <Transition name="nav-menu">
+      <div v-if="moreOpen" class="tabmore-pop" role="menu">
+        <button
+          v-for="p in morePages"
+          :key="p.id"
+          type="button"
+          role="menuitem"
+          :class="{ active: store.page === p.id }"
+          @click="store.page = p.id"
+        >
+          <Icon :name="p.icon" :size="16" />
+          {{ p.label }}
+        </button>
+      </div>
+    </Transition>
 
     <Transition name="toast">
       <div v-if="store.notice" class="toast" role="status">

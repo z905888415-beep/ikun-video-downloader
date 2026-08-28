@@ -196,24 +196,6 @@ watch(() => store.v2Jobs, (jobs) => {
   }
 })
 
-const SITES = [
-  'YouTube',
-  'Bilibili',
-  '抖音',
-  '快手',
-  '小红书',
-  '西瓜视频',
-  'Twitter / X',
-  'TikTok',
-  'Instagram',
-  '微信视频号',
-  'Threads',
-  'Facebook',
-  'Twitch',
-  'Vimeo',
-  '微博'
-]
-
 function onEnter(e: KeyboardEvent): void {
   if (e.key === 'Enter') void store.doResolveV2()
 }
@@ -248,194 +230,151 @@ function fmtDuration(seconds?: number): string {
 
 <template>
   <div class="home-view">
-    <!-- Hero 区域 -->
+    <!-- 中央下载面板：输入行 + 原位状态区 -->
     <section class="hero">
-      <span class="hero-badge">
-        <Icon name="sparkles" :size="13" />
-        AI 驱动 · 支持 1800+ 站点
-      </span>
-      <div class="hero-mark" aria-hidden="true">
-        <Icon name="play" :size="24" />
-      </div>
-      <h1 class="hero-title">全网视频，<span class="hero-grad">一触即取</span></h1>
-      <p class="hero-sub">粘贴短视频分享文案或链接，解析画质，高速下载</p>
-
-      <!-- 解析输入 · 大玻璃面板 -->
-      <div class="beam" :class="{ probing: store.v2Probing }">
-        <div class="beam-top">
-          <span class="beam-orb"><Icon name="link" :size="17" /></span>
+      <div class="panel rise-in" :class="{ probing: store.v2Probing }">
+        <div class="panel-input">
+          <span class="panel-orb" aria-hidden="true"><Icon name="link" :size="17" /></span>
           <input
             v-model="store.url"
-            class="beam-input"
+            class="panel-field"
             type="url"
             inputmode="url"
             autocomplete="off"
             spellcheck="false"
-            placeholder="粘贴短视频分享文案或链接，回车解析…"
+            placeholder="粘贴短视频分享链接，回车解析…"
+            aria-label="视频链接"
             @keydown="onEnter"
             @paste="onPaste"
           />
+          <button class="btn btn-ghost btn-sm panel-paste" type="button" @click="store.pasteFromClipboard()">
+            <Icon name="clipboard" :size="13" />
+            粘贴
+          </button>
+          <button
+            class="btn btn-primary panel-go"
+            type="button"
+            :disabled="store.v2Probing || !store.url.trim()"
+            @click="store.doResolveV2()"
+          >
+            <span v-if="store.v2Probing" class="spinner" />
+            {{ store.v2Probing ? '解析中' : '解析' }}
+          </button>
         </div>
-        <div class="beam-actions">
-          <span class="beam-hint">
-            <Icon name="sparkles" :size="13" />
-            回车快速解析 · 粘贴分享文案会自动提取链接
-          </span>
-          <div class="beam-buttons">
-            <button class="btn btn-ghost btn-sm beam-paste" type="button" @click="store.pasteFromClipboard()">
-              <Icon name="clipboard" :size="13" />
-              粘贴
-            </button>
-            <button
-              class="btn btn-primary beam-go"
-              type="button"
-              :disabled="store.v2Probing || !store.url.trim()"
-              @click="store.doResolveV2()"
-            >
-              <span v-if="store.v2Probing" class="spinner" />
-              <Icon v-else name="sparkles" :size="15" />
-              {{ store.v2Probing ? '解析中' : '解析' }}
-            </button>
+
+        <p v-if="store.urlError" class="panel-error">
+          <Icon name="alert" :size="14" />
+          {{ store.urlError }}
+        </p>
+
+        <div v-if="store.binary && !store.binary.ytdlpOk" class="panel-alert">
+          <Icon name="alert" :size="17" />
+          <div>
+            <strong>未检测到 yt-dlp</strong>
+            <p>请确认项目 resources/bin 下存在 yt-dlp，并重新启动 web 服务。</p>
           </div>
         </div>
-      </div>
 
-      <p v-if="store.urlError" class="beam-error">
-        <Icon name="alert" :size="14" />
-        {{ store.urlError }}
-      </p>
-
-      <!-- 支持站点 · 跑马灯 -->
-      <div class="sites">
-        <div class="sites-head">
-          <span class="sites-label">支持平台</span>
-          <span class="sites-count">等 1800+ 站点持续增加</span>
-        </div>
-        <div class="sites-marquee">
-          <div class="sites-track">
-            <span v-for="s in SITES" :key="s" class="site-chip">{{ s }}</span>
-            <span v-for="s in SITES" :key="`dup-${s}`" class="site-chip" aria-hidden="true">{{ s }}</span>
-          </div>
-        </div>
-      </div>
-
-      <p v-if="store.binary && !store.binary.ytdlpOk" class="alert" style="margin-top: 18px">
-        <Icon name="alert" :size="17" />
-        <span>
-          <strong>未检测到 yt-dlp</strong>
-          <p>请确认项目 resources/bin 下存在 yt-dlp，并重新启动 web 服务。</p>
-        </span>
-      </p>
-    </section>
-
-    <!-- 解析状态：失败 -->
-    <div v-if="store.v2Error" class="card card-pad state-card rise-in">
-      <div class="empty-orb"><Icon name="alert" :size="24" /></div>
-      <div class="empty-title">解析失败</div>
-      <div class="empty-desc">{{ store.v2Error }}</div>
-      <div class="state-actions">
-        <button class="btn btn-ghost btn-sm" type="button" @click="store.doResolveV2()">
-          <Icon name="refresh" :size="13" />
-          重试
-        </button>
-        <button class="btn btn-ghost btn-sm" type="button" @click="store.page = 'settings'">
-          <Icon name="sliders" :size="13" />
-          检查状态
-        </button>
-      </div>
-    </div>
-
-    <!-- 解析状态：解析中 -->
-    <div v-else-if="store.v2Probing" class="card card-pad state-card rise-in">
-      <div class="empty-orb"><Icon name="sparkles" :size="24" /></div>
-      <div class="empty-title">正在解析视频信息</div>
-      <div class="empty-desc">智能清洗文案并调用解析引擎获取标题、画质与资源</div>
-      <div class="loading-track"><i /></div>
-    </div>
-
-    <!-- 解析状态：解析成功结果 -->
-    <div v-else-if="store.v2Resolution" class="card result-card rise-in">
-      <div class="result-grid">
-        <div class="thumb-frame">
-          <img v-if="store.v2Resolution.thumbnail" :src="store.v2Resolution.thumbnail" :alt="store.v2Resolution.title" />
-          <div v-else class="thumb-fallback">
-            <Icon name="play" :size="32" />
-          </div>
-          <span v-if="store.v2Resolution.duration" class="thumb-duration">{{ fmtDuration(store.v2Resolution.duration) }}</span>
-        </div>
-        <div class="result-info">
-          <h2 class="result-title">{{ store.v2Resolution.title }}</h2>
-          <div class="meta-row">
-            <span class="chip">{{ store.v2Resolution.platform || store.v2Resolution.provider }}</span>
-          </div>
-          <div class="format-block">
-            <div class="format-head"><span>选择下载规格：</span></div>
-            <div class="preset-pills">
-              <button
-                v-for="a in store.v2Resolution.actions"
-                :key="a.id"
-                class="preset-pill"
-                type="button"
-                :disabled="(a.type === 'hls' && hlsBusy) || (a.type === 'images-zip' && zipBusy)"
-                @click="handleAction(a)"
-              >
-                {{ a.label }}
+        <!-- 状态区：解析 / 结果 / 进度都在面板内原位出现 -->
+        <div v-if="store.v2Error || store.v2Probing || store.v2Resolution || activeDownload" class="panel-body">
+          <div v-if="store.v2Error" class="panel-state">
+            <span class="state-ico error"><Icon name="alert" :size="19" /></span>
+            <div class="state-text">
+              <strong>解析失败</strong>
+              <span>{{ store.v2Error }}</span>
+            </div>
+            <div class="state-actions">
+              <button class="btn btn-sm" type="button" @click="store.doResolveV2()">
+                <Icon name="refresh" :size="13" />
+                重试
+              </button>
+              <button class="btn btn-ghost btn-sm" type="button" @click="store.page = 'settings'">
+                检查状态
               </button>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
 
-    <!-- 即时下载操作进度条 -->
-    <div v-if="activeDownload" class="card card-pad dl-progress rise-in">
-      <div class="dl-head">
-        <strong>{{ activeDownload.label }}</strong>
-        <span class="dl-status">{{ statusText(activeDownload) }}</span>
-      </div>
-      <div class="pbar"><i :style="{ width: `${activeDownload.percent}%` }" /></div>
-      <div class="dl-foot">
-        <span v-if="activeDownload.kind === 'task' && activeDownload.status !== 'done' && activeDownload.status !== 'error'">
-          任务进度 {{ activeDownload.percent }}%
-        </span>
-        <span v-else-if="activeDownload.status === 'done'">
-          <template v-if="activeDownload.kind === 'task'">
-            处理完成 · 请在下方队列或点击右侧「保存文件」下载到本地
-          </template>
-          <template v-else>
-            已保存到浏览器下载目录
-          </template>
-        </span>
-        <span v-else-if="activeDownload.status === 'error'">下载遇到问题，请重试</span>
-        <span v-else>{{ activeDownload.percent }}%</span>
-        
-        <div class="dl-actions">
-          <button v-if="activeDownload.status === 'error'" class="btn btn-ghost btn-sm" type="button" @click="retryActive()">
-            <Icon name="refresh" :size="13" />重试
-          </button>
-          <a
-            v-if="activeDownload.kind === 'task' && activeDownload.status === 'done' && activeDownload.jobId"
-            class="btn btn-primary btn-sm"
-            :href="apiV2.fileUrl(activeDownload.jobId)"
-            download
-          >
-            <Icon name="download" :size="13" />保存文件
-          </a>
-        </div>
-      </div>
-    </div>
+          <div v-else-if="store.v2Probing" class="panel-state">
+            <span class="state-ico"><span class="spinner" /></span>
+            <div class="state-text">
+              <strong>正在解析视频</strong>
+              <span>正在读取标题与可用画质</span>
+            </div>
+            <div class="loading-track"><i /></div>
+          </div>
 
-    <!-- ==================== 底部内嵌：下载队列模块 ==================== -->
-    <section class="queue-section rise-in">
+          <div v-else-if="store.v2Resolution" class="panel-state state-result">
+            <div class="result-thumb">
+              <img v-if="store.v2Resolution.thumbnail" :src="store.v2Resolution.thumbnail" :alt="store.v2Resolution.title" />
+              <span v-else class="result-thumb-fallback"><Icon name="play" :size="22" /></span>
+              <em v-if="store.v2Resolution.duration" class="result-duration">{{ fmtDuration(store.v2Resolution.duration) }}</em>
+            </div>
+            <div class="result-main">
+              <h2 class="result-title">{{ store.v2Resolution.title }}</h2>
+              <div class="meta-row">
+                <span class="chip">{{ store.v2Resolution.platform || store.v2Resolution.provider }}</span>
+              </div>
+              <div class="preset-pills">
+                <button
+                  v-for="a in store.v2Resolution.actions"
+                  :key="a.id"
+                  class="preset-pill"
+                  type="button"
+                  :disabled="(a.type === 'hls' && hlsBusy) || (a.type === 'images-zip' && zipBusy)"
+                  @click="handleAction(a)"
+                >
+                  {{ a.label }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="activeDownload" class="panel-state state-dl">
+            <div class="dl-head">
+              <strong>{{ activeDownload.label }}</strong>
+              <span class="dl-status">{{ statusText(activeDownload) }}</span>
+            </div>
+            <div class="pbar"><i :style="{ width: `${activeDownload.percent}%` }" /></div>
+            <div class="dl-foot">
+              <span v-if="activeDownload.kind === 'task' && activeDownload.status !== 'done' && activeDownload.status !== 'error'">
+                任务进度 {{ activeDownload.percent }}%
+              </span>
+              <span v-else-if="activeDownload.status === 'done'">
+                <template v-if="activeDownload.kind === 'task'">处理完成 · 点击「保存文件」下载到本地</template>
+                <template v-else>已保存到浏览器下载目录</template>
+              </span>
+              <span v-else-if="activeDownload.status === 'error'">下载遇到问题，请重试</span>
+              <span v-else>{{ activeDownload.percent }}%</span>
+              <div class="dl-actions">
+                <button v-if="activeDownload.status === 'error'" class="btn btn-sm" type="button" @click="retryActive()">
+                  <Icon name="refresh" :size="13" />重试
+                </button>
+                <a
+                  v-if="activeDownload.kind === 'task' && activeDownload.status === 'done' && activeDownload.jobId"
+                  class="btn btn-light btn-sm"
+                  :href="apiV2.fileUrl(activeDownload.jobId)"
+                  download
+                >
+                  <Icon name="download" :size="13" />保存文件
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-else class="panel-space" aria-hidden="true"></div>
+      </div>
+    </section>
+
+    <!-- ==================== 下载队列 ==================== -->
+    <section v-if="store.v2Jobs.length" class="queue-section rise-in">
       <div class="queue-section-header">
         <div class="queue-title-wrap">
           <h2 class="queue-title">
-            <Icon name="layers" :size="18" />
+            <Icon name="download" :size="18" />
             下载队列
           </h2>
-          <span class="queue-counter">
-            {{ store.v2Jobs.length }} 个任务
-            <template v-if="runningCount"> · {{ runningCount }} 进行中</template>
+          <span class="chip queue-counter">
+            {{ store.v2Jobs.length }} 个任务<template v-if="runningCount"> · {{ runningCount }} 进行中</template>
           </span>
         </div>
         <div class="queue-header-actions">
@@ -446,17 +385,7 @@ function fmtDuration(seconds?: number): string {
         </div>
       </div>
 
-      <!-- 队列空状态 -->
-      <div v-if="!store.v2Jobs.length" class="card empty-queue-card">
-        <div class="empty-orb-sm"><Icon name="layers" :size="20" /></div>
-        <div class="empty-queue-text">
-          <strong>暂无下载任务</strong>
-          <span>在上方粘贴链接解析后，选择画质即可在此处跟踪下载进度</span>
-        </div>
-      </div>
-
-      <!-- 任务列表 -->
-      <div v-else class="queue-list-wrap">
+      <div class="queue-list-wrap">
         <!-- 进行中任务 -->
         <template v-if="activeTasks.length">
           <div class="group-label">
@@ -548,7 +477,7 @@ function fmtDuration(seconds?: number): string {
               <div class="task-actions">
                 <a
                   v-if="j.status === 'COMPLETED' && j.filepath"
-                  class="btn btn-primary btn-sm"
+                  class="btn btn-light btn-sm"
                   :href="apiV2.fileUrl(j.id)"
                   download
                 >
@@ -557,7 +486,7 @@ function fmtDuration(seconds?: number): string {
                 </a>
                 <button
                   v-if="j.status === 'FAILED' || j.status === 'RETRY_WAIT' || j.status === 'CANCELLED'"
-                  class="btn btn-ghost btn-sm"
+                  class="btn btn-sm"
                   type="button"
                   @click="store.retryV2Job(j.id)"
                 >
@@ -577,127 +506,66 @@ function fmtDuration(seconds?: number): string {
 .home-view {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
   padding-bottom: 24px;
 }
 
-/* ---------- Hero ---------- */
+/* ---------- 中央面板 ---------- */
 .hero {
-  padding: clamp(20px, 4vw, 46px) 0 6px;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
+  justify-content: center;
+  padding-top: clamp(28px, 8vh, 84px);
 }
 
-.hero-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 14px;
-  border-radius: var(--r-full);
-  border: 1px solid var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 0.02em;
-  box-shadow: 0 0 20px rgba(75, 227, 194, 0.12);
-}
-
-.hero-mark {
-  width: 58px;
-  height: 58px;
-  margin: 20px 0 16px;
-  border-radius: 18px;
-  display: grid;
-  place-items: center;
-  color: var(--on-grad);
-  background: var(--grad-cta);
-  box-shadow: var(--glow-grad), 0 18px 46px rgba(101, 222, 200, 0.32);
-}
-
-.hero-title {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: clamp(28px, 5vw, 44px);
-  font-weight: 800;
-  line-height: 1.14;
-  letter-spacing: -0.04em;
-  text-shadow: 0 2px 24px rgba(2, 6, 18, 0.5);
-}
-
-.hero-grad {
-  background: var(--grad-text);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-  filter: drop-shadow(0 0 20px rgba(101, 222, 200, 0.28));
-}
-
-.hero-sub {
-  margin: 12px 0 28px;
-  color: var(--text-2);
-  font-size: 14.5px;
-}
-
-.beam-error {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 12px 0 0;
-  color: var(--danger);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-/* ---------- 解析输入 · 大玻璃指令面板（站酷参考 One-Click Story 输入区） ---------- */
-.beam {
-  width: min(720px, 100%);
+.panel {
+  width: 100%;
   border-radius: 22px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid rgba(163, 190, 255, 0.13);
   background:
-    linear-gradient(180deg, rgba(151, 184, 255, 0.07), rgba(151, 184, 255, 0.02)),
-    rgba(8, 13, 26, 0.55);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  box-shadow: var(--shadow-card), 0 0 44px rgba(91, 143, 245, 0.09);
-  padding: 14px 14px 12px;
-  text-align: left;
+    linear-gradient(180deg, rgba(151, 184, 255, 0.055), rgba(151, 184, 255, 0.015)),
+    rgba(9, 13, 23, 0.72);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 30px 90px rgba(1, 3, 9, 0.5),
+    0 0 70px rgba(46, 107, 246, 0.07);
   transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
 
-.beam:focus-within {
+.panel:focus-within {
   border-color: var(--accent-border);
-  box-shadow: 0 0 0 4px var(--accent-glow), var(--shadow-card), 0 0 48px rgba(75, 227, 194, 0.13);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 0 0 4px var(--accent-glow),
+    0 30px 90px rgba(1, 3, 9, 0.5),
+    0 0 70px rgba(46, 107, 246, 0.1);
 }
 
-.beam.probing {
+.panel.probing {
   border-color: var(--accent-border);
 }
 
-.beam-top {
+.panel-input {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 2px 4px 12px;
-  border-bottom: 1px solid var(--border);
+  gap: 10px;
+  padding: 12px 14px 12px 18px;
 }
 
-.beam-orb {
+.panel-orb {
   width: 34px;
   height: 34px;
-  border-radius: 12px;
+  border-radius: 11px;
   display: grid;
   place-items: center;
-  color: var(--accent);
+  color: var(--accent-hover);
   background: var(--accent-soft);
   border: 1px solid var(--accent-border);
   flex-shrink: 0;
 }
 
-.beam-input {
+.panel-field {
   flex: 1;
   min-width: 0;
   background: none;
@@ -705,162 +573,138 @@ function fmtDuration(seconds?: number): string {
   outline: none;
   color: var(--text);
   font-size: 15.5px;
-  padding: 6px 0;
+  padding: 8px 0;
 }
 
-.beam-input::placeholder {
+.panel-field::placeholder {
   color: var(--text-3);
 }
 
-.beam-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 11px 4px 0;
+.panel-paste {
+  flex-shrink: 0;
+  border-radius: var(--r-full);
+  border: 1px solid var(--border);
 }
 
-.beam-hint {
-  display: inline-flex;
+.panel-go {
+  flex-shrink: 0;
+  min-width: 88px;
+  border-radius: 12px;
+}
+
+.panel-error {
+  display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--text-3);
-  font-size: 12px;
-}
-
-.beam-hint svg {
-  color: var(--accent);
-  opacity: 0.8;
-}
-
-.beam-buttons {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
-
-.beam-paste {
-  flex-shrink: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--r-full);
-}
-
-.beam-go {
-  flex-shrink: 0;
-  min-width: 96px;
-  border-radius: var(--r-full);
-}
-
-/* ---------- 支持站点 · 跑马灯（Jitter 走马灯范式） ---------- */
-.sites {
-  width: min(780px, 100%);
-  margin-top: 30px;
-}
-
-.sites-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.sites-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--text-3);
-}
-
-.sites-count {
-  font-size: 11.5px;
-  font-weight: 550;
-  background: var(--grad-text);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
-
-.sites-marquee {
-  overflow: hidden;
-  padding: 3px 0;
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
-  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
-}
-
-.sites-track {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: max-content;
-  animation: sites-marquee 40s linear infinite;
-}
-
-.sites-marquee:hover .sites-track {
-  animation-play-state: paused;
-}
-
-@keyframes sites-marquee {
-  to {
-    transform: translateX(calc(-50% - 4px));
-  }
-}
-
-.site-chip {
-  padding: 4px 13px;
-  border-radius: var(--r-full);
-  border: 1px solid var(--border);
-  background: rgba(3, 7, 17, 0.45);
-  color: var(--text-2);
+  margin: 0;
+  padding: 0 20px 12px;
+  color: var(--danger);
   font-size: 12px;
   font-weight: 500;
-  white-space: nowrap;
-  transition: color 0.16s var(--ease), border-color 0.16s var(--ease);
 }
 
-.site-chip:hover {
+.panel-alert {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 0 14px 12px;
+  padding: 11px 14px;
+  border: 1px solid var(--warn-border);
+  border-radius: var(--r-md);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 12.5px;
+}
+
+.panel-alert strong {
   color: var(--text);
-  border-color: var(--border-strong);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .sites-marquee {
-    -webkit-mask-image: none;
-    mask-image: none;
-  }
-
-  .sites-track {
-    animation: none;
-    flex-wrap: wrap;
-    justify-content: center;
-    width: auto;
-  }
+.panel-alert p {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  font-size: 12px;
 }
 
-/* ---------- 状态卡 ---------- */
-.state-card {
-  text-align: center;
-  align-items: center;
+/* 呼吸留白：等待输入时面板的 reserved 空间 */
+.panel-space {
+  height: 68px;
+  border-top: 1px solid var(--border);
+}
+
+.panel-body {
+  border-top: 1px solid var(--border);
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+
+.panel-state {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.panel-state + .panel-state {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.state-ico {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  color: var(--accent-hover);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  flex-shrink: 0;
+}
+
+.state-ico.error {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+
+.state-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.state-text strong {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.state-text span {
+  font-size: 12px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .state-actions {
   display: flex;
   gap: 8px;
-  margin-top: 16px;
+  flex-shrink: 0;
 }
 
 .loading-track {
-  margin-top: 18px;
-  width: 200px;
+  width: 140px;
   height: 3px;
   border-radius: var(--r-full);
   background: var(--surface-2);
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .loading-track i {
@@ -868,7 +712,7 @@ function fmtDuration(seconds?: number): string {
   height: 100%;
   width: 40%;
   border-radius: inherit;
-  background: var(--accent);
+  background: var(--accent-hover);
   animation: loading-slide 1.15s ease-in-out infinite;
 }
 
@@ -877,70 +721,67 @@ function fmtDuration(seconds?: number): string {
   100% { transform: translateX(260%); }
 }
 
-/* ---------- 结果卡 ---------- */
-.result-card {
-  overflow: hidden;
+/* ---------- 面板内解析结果 ---------- */
+.state-result {
+  align-items: flex-start;
 }
 
-.result-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 42%) minmax(0, 58%);
-}
-
-.thumb-frame {
+.result-thumb {
   position: relative;
-  min-height: 100%;
+  width: 132px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--r-md);
+  overflow: hidden;
   background: var(--surface-2);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
-.thumb-frame img {
+.result-thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  position: absolute;
-  inset: 0;
 }
 
-.thumb-fallback {
+.result-thumb-fallback {
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
   color: var(--text-3);
-  background: var(--surface-2);
 }
 
-.thumb-duration {
+.result-duration {
   position: absolute;
-  right: 10px;
-  bottom: 10px;
-  padding: 2px 8px;
-  border-radius: var(--r-sm);
-  background: rgba(4, 10, 22, 0.72);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  right: 6px;
+  bottom: 6px;
+  padding: 1px 7px;
+  border-radius: 7px;
+  background: rgba(4, 10, 22, 0.74);
   border: 1px solid rgba(163, 190, 255, 0.16);
   color: #fff;
-  font-size: 11.5px;
+  font-size: 11px;
+  font-style: normal;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.result-info {
-  padding: clamp(18px, 3vw, 26px);
+.result-main {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 .result-title {
   margin: 0;
-  font-family: var(--font-display);
-  font-size: clamp(16px, 2.2vw, 19px);
+  font-size: 15.5px;
   font-weight: 700;
   letter-spacing: -0.01em;
   line-height: 1.4;
+  color: var(--text);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -953,29 +794,13 @@ function fmtDuration(seconds?: number): string {
   gap: 6px;
 }
 
-/* ---------- 画质选择 ---------- */
-.format-block {
-  display: flex;
+/* 画质选择使用全局 .preset-pills */
+
+/* ---------- 面板内即时下载进度 ---------- */
+.state-dl {
   flex-direction: column;
-  gap: 9px;
-}
-
-.format-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--text-2);
-}
-
-/* 画质规格选择使用全局 .preset-pills（Segmented 范式） */
-
-/* ---------- 即时下载进度 ---------- */
-.dl-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  align-items: stretch;
+  gap: 8px;
 }
 
 .dl-head {
@@ -1000,8 +825,6 @@ function fmtDuration(seconds?: number): string {
   flex-shrink: 0;
 }
 
-/* 进度条使用全局 .pbar（渐变填充 + 辉光） */
-
 .dl-foot {
   display: flex;
   align-items: center;
@@ -1012,15 +835,21 @@ function fmtDuration(seconds?: number): string {
   color: var(--text-2);
 }
 
+.dl-foot > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dl-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-/* ---------- 底部内嵌：下载队列区块 ---------- */
+/* ---------- 下载队列 ---------- */
 .queue-section {
-  margin-top: 10px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1041,66 +870,27 @@ function fmtDuration(seconds?: number): string {
 
 .queue-title {
   margin: 0;
-  font-size: 16px;
+  font-size: 15.5px;
   font-weight: 700;
   letter-spacing: -0.01em;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   color: var(--text);
 }
 
 .queue-title svg {
-  color: var(--accent);
-  filter: drop-shadow(0 0 8px rgba(75, 227, 194, 0.5));
+  color: var(--text-2);
 }
 
 .queue-counter {
-  font-size: 12.5px;
-  color: var(--text-3);
-}
-
-.empty-queue-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 16px 20px;
-  background: var(--surface);
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--r-md);
-}
-
-.empty-orb-sm {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  background: var(--surface-2);
-  display: grid;
-  place-items: center;
-  color: var(--text-3);
-  flex-shrink: 0;
-}
-
-.empty-queue-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.empty-queue-text strong {
-  font-size: 13.5px;
-  color: var(--text);
-}
-
-.empty-queue-text span {
-  font-size: 12px;
-  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
 }
 
 .queue-list-wrap {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .queue-cards-grid {
@@ -1127,8 +917,8 @@ function fmtDuration(seconds?: number): string {
 }
 
 .group-dot.live {
-  background: var(--accent);
-  box-shadow: 0 0 10px rgba(75, 227, 194, 0.7);
+  background: var(--accent-hover);
+  box-shadow: 0 0 8px rgba(62, 123, 250, 0.7);
   animation: pulse-dot 1.4s ease-in-out infinite;
 }
 
@@ -1144,30 +934,29 @@ function fmtDuration(seconds?: number): string {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 12px 16px;
-  transition: border-color 0.18s var(--ease), transform 0.18s var(--ease-spring), box-shadow 0.18s var(--ease);
+  padding: 13px 16px;
+  transition: border-color 0.18s var(--ease), transform 0.18s var(--ease-spring);
 }
 
 .task-card:hover {
   border-color: var(--border-strong);
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 }
 
 .task-card.dim {
-  opacity: 0.82;
+  opacity: 0.85;
 }
 
-/* 进行中的任务：极光青渐变染色（站酷参考统计卡氛围） */
 .task-card.active-card {
-  border-color: rgba(75, 227, 194, 0.26);
+  border-color: rgba(62, 123, 250, 0.28);
   background:
-    linear-gradient(180deg, rgba(75, 227, 194, 0.08), rgba(75, 227, 194, 0) 48%),
-    linear-gradient(180deg, rgba(151, 184, 255, 0.05), rgba(151, 184, 255, 0.015) 42%),
-    rgba(11, 17, 33, 0.6);
+    linear-gradient(180deg, rgba(62, 123, 250, 0.07), rgba(62, 123, 250, 0) 48%),
+    linear-gradient(180deg, rgba(151, 184, 255, 0.04), rgba(151, 184, 255, 0.012) 42%),
+    rgba(10, 15, 26, 0.6);
 }
 
 .task-thumb {
-  width: 54px;
+  width: 52px;
   height: 42px;
   border-radius: var(--r-sm);
   overflow: hidden;
@@ -1184,7 +973,7 @@ function fmtDuration(seconds?: number): string {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .task-head {
@@ -1224,8 +1013,8 @@ function fmtDuration(seconds?: number): string {
 }
 
 .task-percent {
-  color: var(--accent);
-  font-weight: 750;
+  color: var(--accent-hover);
+  font-weight: 700;
 }
 
 .task-error {
@@ -1239,28 +1028,62 @@ function fmtDuration(seconds?: number): string {
   flex-shrink: 0;
 }
 
-@media (max-width: 720px) {
-  .result-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .thumb-frame {
-    min-height: 190px;
-    aspect-ratio: 16 / 9;
-  }
-
-  .hero {
-    padding-top: 12px;
-  }
-}
-
 @media (max-width: 640px) {
+  .hero {
+    padding-top: 16px;
+  }
+
+  .panel-input {
+    flex-wrap: wrap;
+    padding: 12px;
+  }
+
+  .panel-field {
+    flex-basis: 100%;
+    order: -1;
+    padding-left: 2px;
+  }
+
+  .panel-orb {
+    display: none;
+  }
+
+  .panel-paste {
+    margin-left: auto;
+  }
+
+  .panel-body {
+    padding: 14px;
+  }
+
+  .panel-state {
+    flex-wrap: wrap;
+  }
+
+  .state-text {
+    flex-basis: calc(100% - 50px);
+  }
+
+  .state-actions,
+  .loading-track {
+    margin-left: 50px;
+  }
+
+  .result-thumb {
+    width: 100%;
+  }
+
   .task-thumb {
     display: none;
   }
-  
+
   .task-card {
-    padding: 10px 12px;
+    padding: 11px 12px;
+  }
+
+  .task-head {
+    flex-wrap: wrap;
+    gap: 4px 10px;
   }
 }
 </style>

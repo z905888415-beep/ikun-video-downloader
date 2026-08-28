@@ -97,7 +97,7 @@ onMounted(() => {
 .binary-item.ok .binary-state { color: var(--success); }
 .binary-item.bad .binary-state { color: var(--danger); }
 .meter { flex: 1; height: 8px; border-radius: var(--r-full); overflow: hidden; background: rgba(148, 180, 255, 0.12); }
-.meter i { display: block; height: 100%; border-radius: inherit; background: var(--grad-cta); box-shadow: 0 0 10px rgba(101, 222, 200, 0.4); }
+.meter i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #5b8fff, #2e6bf6); box-shadow: 0 0 10px rgba(62, 123, 250, 0.4); }
 .hint { color: var(--text-2); line-height: 1.7; }
 .list { margin: 8px 0 0; padding-left: 20px; }
 .list li::marker { color: var(--accent); }
