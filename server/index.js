@@ -24,7 +24,6 @@ const BIN_DIR = existsSync(join(resolve(__dirname, '..'), 'resources', 'bin'))
   : join(ROOT, 'resources', 'bin')
 const DOWNLOADS_DIR = join(WEB_ROOT, 'downloads')
 const PUBLIC_DIR = join(WEB_ROOT, 'client', 'dist')
-const SUANLE_DIR = join(WEB_ROOT, 'suanle')
 const PORT = Number(process.env.PORT || 8787)
 const HOST = process.env.HOST || '0.0.0.0'
 const TRUST_PROXY = process.env.TRUST_PROXY === 'true'
@@ -505,14 +504,6 @@ app.get('/api/downloads/stats', (_req, res) => {
     historyLimit: settings.historyLimit || 30
   })
 })
-
-// 算了么命理工具（suanle-me 静态产物，独立子路径）
-if (existsSync(join(SUANLE_DIR, 'index.html'))) {
-  app.use('/suanle', express.static(SUANLE_DIR, { maxAge: '1h' }))
-  app.get('/suanle/*', (_req, res) => {
-    res.sendFile(join(SUANLE_DIR, 'index.html'))
-  })
-}
 
 if (existsSync(join(PUBLIC_DIR, 'index.html'))) {
   app.use(express.static(PUBLIC_DIR, { index: false, maxAge: '1h' }))

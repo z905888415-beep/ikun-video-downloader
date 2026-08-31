@@ -16,8 +16,7 @@ web/
 ├─ client/       # Vue 前端
 ├─ server/       # Express API 与静态托管
 ├─ data/         # settings.json、jobs.json（自动创建）
-├─ downloads/    # 服务端下载产物（自动创建）
-└─ suanle/       # 命理工具静态产物（可选）
+└─ downloads/    # 服务端下载产物（自动创建）
 ```
 
 ## 本地开发与构建
@@ -55,7 +54,7 @@ npm run web:start
 - **任务状态**：`RESOLVING → QUEUED → DOWNLOADING → PROCESSING → COMPLETED`。失败任务会进入 `RETRY_WAIT`，可由原浏览器重试。
 - **自动清理**：默认保留 24 小时；服务启动时与之后每 30 分钟清理过期任务和文件。
 - **容量保护**：下载目录超过上限时，自动优先清理最旧且非运行中的任务目录，直至回落至容量上限的 90%。
-- **AI 抠图与命理工具**：保留为独立功能模块，均受公网限流保护。
+- **AI 抠图与生图**：工具箱内独立模块，受公网限流保护。
 
 ## 公网部署（宝塔 / Nginx）
 
@@ -179,18 +178,6 @@ curl -I https://下载站.你的域名/
 - `retries`、`fragmentConcurrency`：网络重试与分片并发
 
 这些字段会传给 yt-dlp 的 `--cookies`、`--proxy`、`--add-header`、`--retries`、`--fragment-retries` 与 `--concurrent-fragments` 参数。Cookie、代理和管理员令牌均不得写入前端代码、仓库或公开截图。
-
-## 命理工具（suanle-me 集成）
-
-源码位于 `../suanle-me`。更新静态产物：
-
-```powershell
-npm --prefix ../suanle-me install
-npm --prefix ../suanle-me run build
-Copy-Item -LiteralPath ../suanle-me/out -Destination ./suanle -Recurse -Force
-```
-
-`web/suanle/` 是构建产物；Express 会在 SPA 回退前挂载 `/suanle`。
 
 ## 注意事项
 

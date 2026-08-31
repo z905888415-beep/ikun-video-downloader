@@ -1,51 +1,23 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onMounted } from 'vue'
 import { useAppStore, type PageId } from './stores/app'
 import Icon from './components/Icon.vue'
 import HomeView from './views/HomeView.vue'
 import ToolboxView from './views/ToolboxView.vue'
-import SuanleView from './views/SuanleView.vue'
 import HistoryView from './views/HistoryView.vue'
 import SettingsView from './views/SettingsView.vue'
 
 const store = useAppStore()
 
-const primaryPages: { id: PageId; label: string; short: string; icon: string }[] = [
+const pages: { id: PageId; label: string; short: string; icon: string }[] = [
   { id: 'home', label: '解析与下载', short: '解析', icon: 'sparkles' },
   { id: 'tools', label: '工具箱', short: '工具', icon: 'grid' },
-  { id: 'history', label: '历史记录', short: '历史', icon: 'clock' }
+  { id: 'history', label: '历史记录', short: '历史', icon: 'clock' },
+  { id: 'settings', label: '服务状态', short: '状态', icon: 'sliders' }
 ]
-
-const morePages: { id: PageId; label: string; icon: string }[] = [
-  { id: 'suanle', label: '命理', icon: 'moon' },
-  { id: 'settings', label: '服务状态', icon: 'sliders' }
-]
-
-const moreOpen = ref(false)
-const moreActive = ref(false)
-
-watch(
-  () => store.page,
-  (page) => {
-    moreOpen.value = false
-    moreActive.value = page === 'suanle' || page === 'settings'
-  },
-  { immediate: true }
-)
-
-function onDocClick(e: MouseEvent): void {
-  if (!moreOpen.value) return
-  const target = e.target as Element | null
-  if (!target?.closest('.nav-more')) moreOpen.value = false
-}
 
 onMounted(() => {
-  document.addEventListener('click', onDocClick)
   void store.init()
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('click', onDocClick)
 })
 </script>
 
@@ -65,7 +37,7 @@ onBeforeUnmount(() => {
 
       <nav class="nav-links" aria-label="主导航">
         <button
-          v-for="p in primaryPages"
+          v-for="p in pages"
           :key="p.id"
           class="nav-link"
           :class="{ active: store.page === p.id }"
@@ -77,34 +49,6 @@ onBeforeUnmount(() => {
             {{ store.v2RunningCount }}
           </span>
         </button>
-
-        <div class="nav-more" :class="{ open: moreOpen }">
-          <button
-            type="button"
-            :aria-haspopup="true"
-            :aria-expanded="moreOpen"
-            @click.stop="moreOpen = !moreOpen"
-          >
-            更多
-            <Icon name="chevronDown" :size="13" />
-            <span v-if="moreActive" class="nav-more-dot" />
-          </button>
-          <Transition name="nav-menu">
-            <div v-if="moreOpen" class="nav-menu" role="menu">
-              <button
-                v-for="p in morePages"
-                :key="p.id"
-                type="button"
-                role="menuitem"
-                :class="{ active: store.page === p.id }"
-                @click="store.page = p.id"
-              >
-                <Icon :name="p.icon" :size="15" />
-                {{ p.label }}
-              </button>
-            </div>
-          </Transition>
-        </div>
       </nav>
 
       <div class="topnav-right">
@@ -128,7 +72,6 @@ onBeforeUnmount(() => {
         <Transition name="page" mode="out-in">
           <HomeView v-if="store.page === 'home'" key="home" />
           <ToolboxView v-else-if="store.page === 'tools'" key="tools" />
-          <SuanleView v-else-if="store.page === 'suanle'" key="suanle" />
           <HistoryView v-else-if="store.page === 'history'" key="history" />
           <SettingsView v-else key="settings" />
         </Transition>
@@ -137,7 +80,7 @@ onBeforeUnmount(() => {
 
     <nav class="tabbar" aria-label="移动端导航">
       <button
-        v-for="p in primaryPages"
+        v-for="p in pages"
         :key="p.id"
         class="tab"
         :class="{ active: store.page === p.id }"
@@ -150,27 +93,7 @@ onBeforeUnmount(() => {
         <Icon :name="(p.icon as any)" :size="19" />
         <span>{{ p.short }}</span>
       </button>
-      <button class="tab" :class="{ active: moreActive }" type="button" @click="moreOpen = !moreOpen">
-        <Icon :name="moreOpen ? 'x' : 'list'" :size="19" />
-        <span>更多</span>
-      </button>
     </nav>
-
-    <Transition name="nav-menu">
-      <div v-if="moreOpen" class="tabmore-pop" role="menu">
-        <button
-          v-for="p in morePages"
-          :key="p.id"
-          type="button"
-          role="menuitem"
-          :class="{ active: store.page === p.id }"
-          @click="store.page = p.id"
-        >
-          <Icon :name="p.icon" :size="16" />
-          {{ p.label }}
-        </button>
-      </div>
-    </Transition>
 
     <Transition name="toast">
       <div v-if="store.notice" class="toast" role="status">
