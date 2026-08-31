@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 import { createProviderRegistry } from './providers/provider-registry.js'
 import { createDouyinProvider } from './providers/douyin-provider.js'
 import { createYtdlpProvider } from './providers/ytdlp-provider.js'
+import { createTwitterPhotoProvider } from './providers/twitter-photo-provider.js'
 import { createResolutionService } from './core/resolution-service.js'
 import { createAssetRegistry } from './core/asset-registry.js'
 import { createJobStore } from './core/job-store.js'
@@ -34,6 +35,7 @@ export function composeApp({ settings = {} } = {}) {
   registry.register(createDouyinProvider({
     cookies: settings.douyinCookies || ''
   }))
+  registry.register(createTwitterPhotoProvider())
   registry.register(createYtdlpProvider({
     binDir: BIN_DIR,
     cookiesFile: settings.cookiesFile,
