@@ -3,9 +3,26 @@ import { computed, onMounted, ref } from 'vue'
 import { apiV2 } from '../api/client'
 import { useAppStore } from '../stores/app'
 import Icon from '../components/Icon.vue'
+import { canShareFilesToAlbum, saveUrlToAlbum } from '../lib/save-to-album'
 
 const store = useAppStore()
 const query = ref('')
+const albumSupported = canShareFilesToAlbum()
+const albumBusy = ref<Record<string, boolean>>({})
+
+async function saveItemToAlbum(item: { id: string; filename?: string }): Promise<void> {
+  if (albumBusy.value[item.id]) return
+  albumBusy.value = { ...albumBusy.value, [item.id]: true }
+  try {
+    const result = await saveUrlToAlbum(apiV2.fileUrl(item.id), item.filename || 'video')
+    store.setNotice(result === 'saved' ? '已存入相册' : '已取消保存')
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    store.setNotice(/NotAllowedError/i.test(msg) ? '文件较大或未授权，请用「下载文件」后到文件 App 存入相册' : msg)
+  } finally {
+    albumBusy.value = { ...albumBusy.value, [item.id]: false }
+  }
+}
 
 onMounted(() => {
   store.startV2Polling()
@@ -131,6 +148,16 @@ function statusLabel(status: string): string {
           <div v-if="item.error" class="history-error">{{ item.error.message }}</div>
         </div>
         <div class="history-actions">
+          <button
+            v-if="albumSupported && item.status === 'COMPLETED' && item.filepath"
+            class="btn btn-sm"
+            type="button"
+            :disabled="albumBusy[item.id]"
+            @click="saveItemToAlbum(item)"
+          >
+            <Icon name="share" :size="13" />
+            存入相册
+          </button>
           <a
             v-if="item.status === 'COMPLETED' && item.filepath"
             class="btn btn-light btn-sm"

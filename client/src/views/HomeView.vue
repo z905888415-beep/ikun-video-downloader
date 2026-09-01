@@ -5,12 +5,29 @@ import Icon from '../components/Icon.vue'
 import { downloadHls } from '../lib/hls-download'
 import { downloadImagesAsZip } from '../lib/images-zip'
 import { apiV2, type V2Job, type V2MediaAction, type V2Resolution } from '../api/client'
+import { canShareFilesToAlbum, saveUrlToAlbum } from '../lib/save-to-album'
 
 const store = useAppStore()
 
 const hlsBusy = ref(false)
 const zipBusy = ref(false)
 const queueExpanded = ref(false)
+const albumSupported = canShareFilesToAlbum()
+const albumBusy = ref<Record<string, boolean>>({})
+
+async function saveJobToAlbum(job: { id: string; filename?: string }): Promise<void> {
+  if (albumBusy.value[job.id]) return
+  albumBusy.value = { ...albumBusy.value, [job.id]: true }
+  try {
+    const result = await saveUrlToAlbum(apiV2.fileUrl(job.id), job.filename || 'video')
+    store.setNotice(result === 'saved' ? '已存入相册' : '已取消保存')
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    store.setNotice(/NotAllowedError/i.test(msg) ? '文件较大或未授权，请用「保存文件」后到文件 App 存入相册' : msg)
+  } finally {
+    albumBusy.value = { ...albumBusy.value, [job.id]: false }
+  }
+}
 
 const activeDownload = ref<{
   label: string
@@ -482,6 +499,15 @@ function fmtDuration(seconds?: number): string {
                 <button v-if="activeDownload.status === 'error'" class="btn btn-sm" type="button" @click="retryActive()">
                   <Icon name="refresh" :size="13" />重试
                 </button>
+                <button
+                  v-if="albumSupported && activeDownload.kind === 'task' && activeDownload.status === 'done' && activeDownload.jobId"
+                  class="btn btn-sm"
+                  type="button"
+                  :disabled="albumBusy[activeDownload.jobId]"
+                  @click="saveJobToAlbum({ id: activeDownload.jobId, filename: activeDownload.filename })"
+                >
+                  <Icon name="share" :size="13" />存入相册
+                </button>
                 <a
                   v-if="activeDownload.kind === 'task' && activeDownload.status === 'done' && activeDownload.jobId"
                   class="btn btn-light btn-sm"
@@ -609,6 +635,16 @@ function fmtDuration(seconds?: number): string {
                 </div>
               </div>
               <div class="task-actions">
+                <button
+                  v-if="albumSupported && j.status === 'COMPLETED' && j.filepath"
+                  class="btn btn-sm"
+                  type="button"
+                  :disabled="albumBusy[j.id]"
+                  @click="saveJobToAlbum(j)"
+                >
+                  <Icon name="share" :size="13" />
+                  存入相册
+                </button>
                 <a
                   v-if="j.status === 'COMPLETED' && j.filepath"
                   class="btn btn-light btn-sm"
