@@ -7,9 +7,8 @@ import { PDFDocument } from 'pdf-lib'
 import { jsPDF } from 'jspdf'
 import { Archive, ArchiveCompression, ArchiveFormat } from 'libarchive.js/dist/libarchive.js'
 import Icon from '../components/Icon.vue'
-import { api } from '../api/client'
 
-type ToolMode = 'cutout' | 'archive' | 'video' | 'gif' | 'image' | 'pdf'
+type ToolMode = 'archive' | 'video' | 'gif' | 'image' | 'pdf'
 type Preset = 'quality' | 'balanced' | 'tiny'
 
 const mode = ref<ToolMode>('archive')
@@ -42,12 +41,6 @@ const imageType = ref('image/webp')
 const imageQuality = ref(0.82)
 const imageWidth = ref(0)
 const pdfAction = ref<'merge' | 'split' | 'images-to-pdf' | 'pdf-to-images' | 'compress'>('merge')
-const cutoutProfile = ref<'sharp' | 'fur'>('sharp')
-const cutoutPreviewUrl = ref('')
-const cutoutSourceUrl = ref('')
-const cutoutBlob = ref<Blob | null>(null)
-const cutoutName = ref('cutout.png')
-const aiStatusText = ref('')
 
 const maxGifStart = computed(() => Math.max(0, videoDuration.value - 0.5))
 const maxGifDuration = computed(() => Math.min(30, Math.max(0.5, videoDuration.value ? videoDuration.value - gifStart.value : 30)))
@@ -58,7 +51,6 @@ let ffmpeg: FFmpeg | null = null
 let archiveReady = false
 
 const tabs = [
-  { id: 'cutout' as const, title: 'AI 抠图', sub: '远程 miaoCut · 透明 PNG', icon: 'image', wide: true },
   { id: 'archive' as const, title: '压缩包', sub: 'zip / 7z / rar / tar.gz', icon: 'archive', wide: true },
   { id: 'video' as const, title: '视频压缩', sub: 'ffmpeg.wasm 本地处理', icon: 'video', wide: false },
   { id: 'gif' as const, title: '视频转 GIF', sub: '裁剪时长 / 帧率 / 宽度', icon: 'play', wide: false },
@@ -75,14 +67,6 @@ function setFiles(next: File[]): void {
   if (videoObjectUrl.value) URL.revokeObjectURL(videoObjectUrl.value)
   videoDuration.value = 0
   videoObjectUrl.value = video ? URL.createObjectURL(video) : ''
-  if (cutoutSourceUrl.value) URL.revokeObjectURL(cutoutSourceUrl.value)
-  const image = files.value.find((file) => file.type.startsWith('image/'))
-  cutoutSourceUrl.value = image ? URL.createObjectURL(image) : ''
-  if (cutoutPreviewUrl.value) {
-    URL.revokeObjectURL(cutoutPreviewUrl.value)
-    cutoutPreviewUrl.value = ''
-  }
-  cutoutBlob.value = null
   void nextTick(drawPreview)
 }
 
@@ -309,8 +293,6 @@ watch([cropX, cropY, cropW, cropH, gifWidth, captionText, captionSize, captionCo
 })
 
 onBeforeUnmount(() => {
-  if (cutoutPreviewUrl.value) URL.revokeObjectURL(cutoutPreviewUrl.value)
-  if (cutoutSourceUrl.value) URL.revokeObjectURL(cutoutSourceUrl.value)
   if (videoObjectUrl.value) URL.revokeObjectURL(videoObjectUrl.value)
 })
 
@@ -342,100 +324,6 @@ async function videoToGif(): Promise<void> {
   } finally { busy.value = false }
 }
 
-
-const ACCEPT_CUTOUT = 'image/jpeg,image/png,image/webp'
-
-function clearCutoutResult(): void {
-  if (cutoutPreviewUrl.value) URL.revokeObjectURL(cutoutPreviewUrl.value)
-  cutoutPreviewUrl.value = ''
-  cutoutBlob.value = null
-}
-
-async function refreshAiStatus(): Promise<void> {
-  try {
-    const s = await api.aiStatus()
-    if (s.ok) {
-      const ready = s.upstream && (s.upstream as { model_ready?: boolean }).model_ready
-      aiStatusText.value = s.remote
-        ? `远程 AI 在线${ready === false ? '（模型未就绪）' : ''}`
-        : `自建 AI 在线 · ${s.baseUrl}`
-    } else {
-      aiStatusText.value = s.error || 'AI 服务不可用'
-    }
-  } catch (error) {
-    aiStatusText.value = error instanceof Error ? error.message : 'AI 状态探测失败'
-  }
-}
-
-async function compressForCutout(file: File): Promise<File> {
-  const maxDim = 2048
-  const maxPixels = 2048 * 2048
-  if (!file.type.startsWith('image/')) throw new Error('请选择 JPG / PNG / WebP 图片')
-  const url = URL.createObjectURL(file)
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image()
-      el.onload = () => resolve(el)
-      el.onerror = () => reject(new Error('图片解析失败'))
-      el.src = url
-    })
-    let w = img.naturalWidth || img.width
-    let h = img.naturalHeight || img.height
-    if (!w || !h) throw new Error('图片尺寸无效')
-    const scale = Math.min(1, maxDim / w, maxDim / h, Math.sqrt(maxPixels / (w * h)))
-    if (scale >= 1 && file.size <= 500 * 1024) return file
-    w = Math.max(1, Math.round(w * scale))
-    h = Math.max(1, Math.round(h * scale))
-    const canvas = document.createElement('canvas')
-    canvas.width = w
-    canvas.height = h
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('浏览器不支持 Canvas')
-    ctx.drawImage(img, 0, 0, w, h)
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.95))
-    if (!blob) throw new Error('图片压缩失败')
-    const base = (file.name || 'image').replace(/\.[^.]+$/, '')
-    return new File([blob], `${base}.webp`, { type: 'image/webp' })
-  } finally {
-    URL.revokeObjectURL(url)
-  }
-}
-
-async function runCutout(): Promise<void> {
-  const file = files.value.find((f) => f.type.startsWith('image/')) || files.value[0]
-  if (!file) return
-  busy.value = true
-  progress.value = 8
-  message.value = '正在准备图片…'
-  clearCutoutResult()
-  try {
-    progress.value = 20
-    const prepared = await compressForCutout(file)
-    progress.value = 40
-    message.value = cutoutProfile.value === 'fur' ? 'AI 细腻抠图中（毛发模式，稍慢）…' : 'AI 快速抠图中…'
-    const blob = await api.removeBackground(prepared, cutoutProfile.value)
-    cutoutBlob.value = blob
-    cutoutPreviewUrl.value = URL.createObjectURL(blob)
-    const base = (file.name || 'image').replace(/\.[^.]+$/, '')
-    cutoutName.value = `${base}-cutout.png`
-    progress.value = 100
-    message.value = `完成：${fmt(file.size)} → ${fmt(blob.size)} 透明 PNG`
-  } catch (error) {
-    message.value = error instanceof Error ? error.message : String(error)
-    progress.value = 0
-  } finally {
-    busy.value = false
-  }
-}
-
-function downloadCutout(): void {
-  if (!cutoutBlob.value) return
-  saveBlob(cutoutBlob.value, cutoutName.value)
-}
-
-watch(mode, (next) => {
-  if (next === 'cutout') void refreshAiStatus()
-})
 
 async function convertImages(): Promise<void> {
   if (!files.value.length) return
@@ -540,9 +428,8 @@ async function runPdf(): Promise<void> {
     <!-- 文件拖拽区（生图工具用自己的参考图槽，不走通用拖拽） -->
     <label class="drop-card" :class="{ filled: files.length }" @dragover.prevent @drop.prevent="drop">
       <input
-        :multiple="mode !== 'cutout'"
+        multiple
         type="file"
-        :accept="mode === 'cutout' ? ACCEPT_CUTOUT : undefined"
         @change="pick"
       />
       <span class="drop-icon"><Icon name="plus" :size="26" /></span>
@@ -551,59 +438,13 @@ async function runPdf(): Promise<void> {
         {{
           files.length
             ? files.map(f => f.name).slice(0, 3).join('、')
-            : mode === 'cutout'
-              ? '支持 JPG / PNG / WebP · 经服务器转发远程 AI'
-              : '支持批量处理，本地工具不上传服务器'
+            : '支持批量处理，本地工具不上传服务器'
         }}
       </small>
     </label>
 
-    <!-- AI 抠图 -->
-    <section v-if="mode === 'cutout'" class="card card-pad tool-panel rise-in">
-      <h3 class="card-title">AI 抠图 · 透明 PNG</h3>
-      <div class="preset-pills" style="margin-top: 14px">
-        <button
-          class="preset-pill"
-          :class="{ active: cutoutProfile === 'sharp' }"
-          type="button"
-          @click="cutoutProfile = 'sharp'"
-        >
-          快速（锐利边缘）
-        </button>
-        <button
-          class="preset-pill"
-          :class="{ active: cutoutProfile === 'fur' }"
-          type="button"
-          @click="cutoutProfile = 'fur'"
-        >
-          细腻（毛发 / 发丝）
-        </button>
-      </div>
-      <div class="tool-actions">
-        <button class="btn btn-primary" :disabled="busy || !files.length" @click="runCutout">
-          <Icon name="sparkles" :size="15" />开始抠图
-        </button>
-        <button class="btn btn-ghost" :disabled="!cutoutBlob" @click="downloadCutout">
-          下载 PNG
-        </button>
-        <button class="btn btn-ghost" type="button" :disabled="busy" @click="refreshAiStatus">
-          检测 AI
-        </button>
-      </div>
-      <div v-if="cutoutSourceUrl || cutoutPreviewUrl" class="cutout-preview">
-        <div v-if="cutoutSourceUrl" class="cutout-pane">
-          <span>原图</span>
-          <img :src="cutoutSourceUrl" alt="原图预览" />
-        </div>
-        <div v-if="cutoutPreviewUrl" class="cutout-pane">
-          <span>抠图结果</span>
-          <img class="checker" :src="cutoutPreviewUrl" alt="抠图结果" />
-        </div>
-      </div>
-    </section>
-
     <!-- 压缩包 -->
-    <section v-else-if="mode === 'archive'" class="card card-pad tool-panel rise-in">
+    <section v-if="mode === 'archive'" class="card card-pad tool-panel rise-in">
 
       <h3 class="card-title">压缩包处理</h3>
       <div class="tool-grid">
@@ -1030,43 +871,4 @@ async function runPdf(): Promise<void> {
   font-size: 12px;
 }
 
-.cutout-preview {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-  margin-top: 16px;
-}
-
-.cutout-pane {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface-2);
-}
-
-.cutout-pane span {
-  color: var(--text-3);
-  font-size: 12px;
-}
-
-.cutout-pane img {
-  width: 100%;
-  max-height: 320px;
-  object-fit: contain;
-  border-radius: var(--r-md);
-  background: #111;
-}
-
-.cutout-pane img.checker {
-  background-color: #1a1a1a;
-  background-image:
-    linear-gradient(45deg, #2a2a2a 25%, transparent 25%),
-    linear-gradient(-45deg, #2a2a2a 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #2a2a2a 75%),
-    linear-gradient(-45deg, transparent 75%, #2a2a2a 75%);
-  background-size: 16px 16px;
-  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
-}
 </style>
