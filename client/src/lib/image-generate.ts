@@ -2,8 +2,7 @@ const CFG_MODEL = 'ikun_image_model'
 
 // 端点与密钥由 iKun 服务端内置（/etc/ikun-web.env 的 IMAGE_API_*），前端只选模型。
 export const IMAGE_MODELS = [
-  { id: 'gpt-image-2', label: 'GPT-Image-2' },
-  { id: 'grok-imagine-image-quality', label: 'Grok 生图' }
+  { id: 'gpt-image-2', label: 'GPT-Image-2' }
 ] as const
 
 export function loadImageGenModel(): string {
