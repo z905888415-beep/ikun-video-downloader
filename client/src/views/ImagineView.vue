@@ -565,6 +565,11 @@ onBeforeUnmount(() => {
   margin-top: 18px;
 }
 
+.gen-row .btn-block {
+  flex: 1;
+  width: auto;
+}
+
 .imagine-error {
   margin: 12px 0 0;
   font-size: 12.5px;

@@ -226,6 +226,7 @@ export const useImagineStore = defineStore('imagine', {
           this.statusText = ''
         }
       } finally {
+        this.generating = false
         if (getImagineAbort() === controller) setImagineAbort(null)
       }
     },
