@@ -1,24 +1,16 @@
 const CFG_MODEL = 'ikun_image_model'
 
-// 端点与密钥由 iKun 服务端内置（/etc/ikun-web.env 的 IMAGE_API_*），前端只选模型。
-export const IMAGE_MODELS = [
-  { id: 'gpt-image-2', label: 'GPT-Image-2' }
-] as const
+// 端点与密钥由 iKun 服务端内置（/etc/ikun-web.env 的 IMAGE_API_*）。
+// 模型与分辨率不在前端暴露：模型固定走服务端分组可用值，分辨率由上游档位决定。
 
 export function loadImageGenModel(): string {
-  const saved = localStorage.getItem(CFG_MODEL)
-  return IMAGE_MODELS.some((m) => m.id === saved) ? (saved as string) : 'gpt-image-2'
-}
-
-export function saveImageGenModel(model: string): void {
-  localStorage.setItem(CFG_MODEL, IMAGE_MODELS.some((m) => m.id === model) ? model : 'gpt-image-2')
+  return localStorage.getItem(CFG_MODEL) || 'gpt-image-2'
 }
 
 export interface ImageGenRequest {
-  model: string
   prompt: string
   size: string
-  resolution: string
+  resolution?: string
   imageDataUrl?: string
   signal?: AbortSignal
   onProgress?: (percent: number) => void
@@ -92,12 +84,12 @@ export async function generateImage(req: ImageGenRequest): Promise<string> {
 
   req.onProgress?.(8)
   const body: Record<string, unknown> = {
-    model: req.model || 'gpt-image-2',
+    model: loadImageGenModel(),
     prompt,
     n: 1,
-    size: req.size,
-    resolution: req.resolution
+    size: req.size
   }
+  if (req.resolution) body.resolution = req.resolution
   if (req.imageDataUrl) body.image_urls = [req.imageDataUrl]
 
   const res = await fetch('/api/ai/images/generations', {

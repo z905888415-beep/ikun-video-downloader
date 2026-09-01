@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue'
 import Icon from '../components/Icon.vue'
-import { generateImage, loadImageGenModel, saveImageGenModel, IMAGE_MODELS } from '../lib/image-generate'
+import { generateImage } from '../lib/image-generate'
 
 interface Work {
   id: string
   prompt: string
-  model: string
   imageUrl: string
   createdAt: number
 }
@@ -15,10 +14,8 @@ const WORKS_KEY = 'ikun_imagine_works'
 const WORKS_MAX = 24
 
 const mode = ref<'text' | 'image'>('text')
-const model = ref(loadImageGenModel())
 const prompt = ref('')
 const size = ref('1024x1024')
-const resolution = ref('2K')
 const refUrl = ref('')
 const refName = ref('')
 let refFile: File | null = null
@@ -47,11 +44,6 @@ function persistWorks(): void {
   } catch {
     /* 配额满则放弃持久化，会话内仍可见 */
   }
-}
-
-function pickModel(id: string): void {
-  model.value = id
-  saveImageGenModel(id)
 }
 
 function onPickRef(file?: File | null): void {
@@ -126,7 +118,6 @@ async function generate(): Promise<void> {
     errorMsg.value = '图生图需要先添加参考图'
     return
   }
-  saveImageGenModel(model.value)
   generating.value = true
   progress.value = 4
   statusText.value = '正在提交生图任务…'
@@ -138,10 +129,8 @@ async function generate(): Promise<void> {
       imageDataUrl = await fileToDataUrl(refFile)
     }
     const url = await generateImage({
-      model: model.value,
       prompt: prompt.value,
       size: size.value,
-      resolution: resolution.value,
       imageDataUrl: imageDataUrl || undefined,
       signal: abortController.signal,
       onProgress: (p) => {
@@ -155,7 +144,6 @@ async function generate(): Promise<void> {
     const work: Work = {
       id: `w_${Date.now()}`,
       prompt: prompt.value.trim(),
-      model: model.value,
       imageUrl: url,
       createdAt: Date.now()
     }
@@ -181,8 +169,6 @@ function cancel(): void {
 function openWork(work: Work): void {
   resultUrl.value = work.imageUrl
   prompt.value = work.prompt
-  model.value = work.model
-  saveImageGenModel(work.model)
   statusText.value = '已打开历史作品'
   errorMsg.value = ''
 }
@@ -228,24 +214,6 @@ onBeforeUnmount(() => {
           <button class="seg-btn" :class="{ active: mode === 'image' }" type="button" role="tab" :aria-selected="mode === 'image'" @click="mode = 'image'">
             图生图
           </button>
-        </div>
-
-        <div class="block">
-          <span class="block-label">模型</span>
-          <div class="preset-pills" role="radiogroup" aria-label="模型">
-            <button
-              v-for="m in IMAGE_MODELS"
-              :key="m.id"
-              class="preset-pill"
-              :class="{ active: model === m.id }"
-              type="button"
-              role="radio"
-              :aria-checked="model === m.id"
-              @click="pickModel(m.id)"
-            >
-              {{ m.label }}
-            </button>
-          </div>
         </div>
 
         <div class="block prompt-block">
@@ -309,24 +277,6 @@ onBeforeUnmount(() => {
             >
               <i class="size-box" :style="{ width: s.w + 'px', height: s.h + 'px' }" />
               {{ s.ratio }}
-            </button>
-          </div>
-        </div>
-
-        <div class="block">
-          <span class="block-label">分辨率</span>
-          <div class="preset-pills" role="radiogroup" aria-label="分辨率">
-            <button
-              v-for="r in ['1K', '2K', '4K']"
-              :key="r"
-              class="preset-pill"
-              :class="{ active: resolution === r }"
-              type="button"
-              role="radio"
-              :aria-checked="resolution === r"
-              @click="resolution = r"
-            >
-              {{ r }}
             </button>
           </div>
         </div>
