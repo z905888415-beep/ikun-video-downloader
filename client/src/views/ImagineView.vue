@@ -1,135 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { storeToRefs } from 'pinia'
 import Icon from '../components/Icon.vue'
-import { generateImage, generateImageEdit } from '../lib/image-generate'
+import { REFS_MAX, useImagineStore } from '../stores/imagine'
 
-interface Work {
-  id: string
-  prompt: string
-  imageUrl: string
-  createdAt: number
-}
+// 生成状态与作品缓存都常驻 Pinia store：切换页面不打断生成，返回即见进度与结果
+const store = useImagineStore()
+const { mode, prompt, size, refs, generating, progress, statusText, errorMsg, resultUrl, works } = storeToRefs(store)
 
-const WORKS_KEY = 'ikun_imagine_works'
-const WORKS_MAX = 24
-
-const mode = ref<'text' | 'image'>('text')
-const prompt = ref('')
-const size = ref('1024x1024')
-
-interface RefItem {
-  key: string
-  name: string
-  url: string
-  file: File
-}
-
-const REFS_MAX = 4
-const refs = ref<RefItem[]>([])
-let refSeq = 0
-
-const generating = ref(false)
-const progress = ref(0)
-const statusText = ref('')
-const errorMsg = ref('')
-const resultUrl = ref('')
-let abortController: AbortController | null = null
-
-const works = ref<Work[]>(loadWorks())
-
-function loadWorks(): Work[] {
-  try {
-    const raw = JSON.parse(localStorage.getItem(WORKS_KEY) || '[]') as Work[]
-    return Array.isArray(raw) ? raw.filter((w) => /^https?:\/\//.test(w.imageUrl)).slice(0, WORKS_MAX) : []
-  } catch {
-    return []
-  }
-}
-
-function persistWorks(): void {
-  try {
-    localStorage.setItem(WORKS_KEY, JSON.stringify(works.value.slice(0, WORKS_MAX)))
-  } catch {
-    /* 配额满则放弃持久化，会话内仍可见 */
-  }
-}
-
-function addRefFiles(files: Array<File | null | undefined>): void {
-  for (const file of files) {
-    if (!file) continue
-    if (!file.type.startsWith('image/')) {
-      errorMsg.value = '请选择图片文件作为参考图'
-      continue
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      errorMsg.value = '参考图不能超过 10MB'
-      continue
-    }
-    if (refs.value.length >= REFS_MAX) {
-      errorMsg.value = `最多添加 ${REFS_MAX} 张参考图`
-      break
-    }
-    errorMsg.value = ''
-    refSeq += 1
-    refs.value = [...refs.value, {
-      key: `ref_${Date.now()}_${refSeq}`,
-      name: file.name || `参考图${refs.value.length + 1}`,
-      url: URL.createObjectURL(file),
-      file
-    }]
-  }
-}
-
-function onRefInput(e: Event): void {
-  addRefFiles([...((e.target as HTMLInputElement).files || [])])
-  ;(e.target as HTMLInputElement).value = ''
-}
-
-function onRefDrop(e: DragEvent): void {
-  addRefFiles([...(e.dataTransfer?.files || [])])
-}
-
-function removeRef(key: string): void {
-  const item = refs.value.find((r) => r.key === key)
-  if (item?.url.startsWith('blob:')) URL.revokeObjectURL(item.url)
-  refs.value = refs.value.filter((r) => r.key !== key)
-}
-
-function addRefFromUrl(url: string, name: string): void {
-  if (refs.value.length >= REFS_MAX) {
-    errorMsg.value = `参考图已满 ${REFS_MAX} 张，已替换最后一张`
-    removeRef(refs.value[refs.value.length - 1].key)
-  }
-  refSeq += 1
-  refs.value = [...refs.value, { key: `ref_${Date.now()}_${refSeq}`, name, url, file: null as unknown as File }]
-}
-
-async function resolveRefFile(item: RefItem): Promise<File> {
-  if (item.file && item.file.size > 0) return item.file
-  const blob = await (await fetch(item.url)).blob()
-  const file = new File([blob], item.name, { type: blob.type || 'image/png' })
-  item.file = file
-  return file
-}
-
-async function setRefFromUrl(url: string): Promise<void> {
-  try {
-    const blob = await (await fetch(url)).blob()
-    const file = new File([blob], 'generated.png', { type: blob.type || 'image/png' })
-    addRefFiles([file])
-    mode.value = 'image'
-    statusText.value = `已添加为 图${refs.value.length}，可用 @图${refs.value.length} 指代它`
-  } catch {
-    errorMsg.value = '参考图获取失败'
-  }
-}
-
-function maxMentionedRef(promptText: string): number {
-  const matches = [...promptText.matchAll(/@图\s*(\d{1,2})/g)].map((m) => Number(m[1]))
-  return matches.length ? Math.max(...matches) : 0
-}
-
-/* ---------- @ 提及选择器：输入 @ 弹出参考图预览 ---------- */
 const promptEl = ref<HTMLTextAreaElement | null>(null)
 const mention = ref<{ start: number; query: string } | null>(null)
 let mentionBlurTimer: number | null = null
@@ -187,114 +65,53 @@ function onPromptFocus(): void {
   }
 }
 
-async function generate(): Promise<void> {
-  if (generating.value) return
-  errorMsg.value = ''
-  if (!prompt.value.trim()) {
-    errorMsg.value = '请先描述你想创造的画面'
-    return
-  }
-  if (mode.value === 'image' && !refs.value.length) {
-    errorMsg.value = '图生图需要先添加参考图'
-    return
-  }
-  const mentioned = maxMentionedRef(prompt.value)
-  if (mode.value === 'image' && mentioned > refs.value.length) {
-    errorMsg.value = `提示词里引用了 @图${mentioned}，但只添加了 ${refs.value.length} 张参考图`
-    return
-  }
-  // 发送前把 @图N 替换成模型更易理解的「第N张参考图」
-  const sentPrompt = prompt.value.replace(/@图\s*(\d{1,2})/g, '第$1张参考图')
-  generating.value = true
-  progress.value = 4
-  statusText.value = '正在提交生图任务…'
-  resultUrl.value = ''
-  abortController = new AbortController()
-  try {
-    const onProgress = (p: number): void => {
-      progress.value = p
-      statusText.value = p >= 100 ? '生成完成' : `生成中 ${Math.round(p)}%`
-    }
-    let url: string
-    if (mode.value === 'image') {
-      const files = []
-      for (const item of refs.value) files.push(await resolveRefFile(item))
-      url = await generateImageEdit({
-        prompt: sentPrompt,
-        size: size.value,
-        files,
-        signal: abortController.signal,
-        onProgress
-      })
-    } else {
-      url = await generateImage({
-        prompt: prompt.value,
-        size: size.value,
-        signal: abortController.signal,
-        onProgress
-      })
-    }
-    resultUrl.value = url
-    progress.value = 100
-    statusText.value = '图片已就绪'
-    const work: Work = {
-      id: `w_${Date.now()}`,
-      prompt: prompt.value.trim(),
-      imageUrl: url,
-      createdAt: Date.now()
-    }
-    works.value = [work, ...works.value].slice(0, WORKS_MAX)
-    persistWorks()
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      statusText.value = '已取消'
-    } else {
-      errorMsg.value = error instanceof Error ? error.message : String(error)
-      statusText.value = ''
-    }
-  } finally {
-    generating.value = false
-    abortController = null
-  }
+function onRefInput(e: Event): void {
+  store.addRefFiles([...((e.target as HTMLInputElement).files || [])])
+  ;(e.target as HTMLInputElement).value = ''
+}
+
+function onRefDrop(e: DragEvent): void {
+  store.addRefFiles([...(e.dataTransfer?.files || [])])
+}
+
+function removeRef(key: string): void {
+  store.removeRef(key)
+}
+
+function setRefFromUrl(url: string): void {
+  void store.setRefFromUrl(url)
+}
+
+function generate(): void {
+  void store.generate()
 }
 
 function cancel(): void {
-  abortController?.abort()
+  store.cancel()
 }
 
-function openWork(work: Work): void {
-  resultUrl.value = work.imageUrl
-  prompt.value = work.prompt
-  statusText.value = '已打开历史作品'
-  errorMsg.value = ''
+function openWork(work: { id: string; prompt: string; imageUrl: string }): void {
+  store.openWork(work)
 }
 
-function removeWork(work: Work): void {
-  works.value = works.value.filter((w) => w.id !== work.id)
-  persistWorks()
-  if (resultUrl.value === work.imageUrl) {
-    resultUrl.value = ''
-    statusText.value = ''
-  }
+function removeWork(work: { id: string; imageUrl: string }): void {
+  void store.removeWork(work)
 }
 
 function download(): void {
-  if (!resultUrl.value) return
-  const a = document.createElement('a')
-  a.href = resultUrl.value
-  a.download = `ikun-${Date.now()}.png`
-  a.rel = 'noopener'
-  a.click()
+  store.downloadResult()
 }
 
+onMounted(() => {
+  void store.initWorks()
+})
+
 onBeforeUnmount(() => {
-  abortController?.abort()
+  // 不中止生成：store 常驻，切页后继续跑，返回即见进度/结果
   if (mentionBlurTimer != null) window.clearTimeout(mentionBlurTimer)
-  for (const item of refs.value) {
-    if (item.url.startsWith('blob:')) URL.revokeObjectURL(item.url)
-  }
 })
 </script>
+
 
 <template>
   <div class="imagine-view">
@@ -441,7 +258,7 @@ onBeforeUnmount(() => {
         <div class="works">
           <div class="works-head">
             <strong>我的作品</strong>
-            <span>{{ works.length }}/{{ 24 }} · 仅存本机</span>
+            <span>{{ works.length }}/10 · 仅存本机</span>
           </div>
           <div v-if="works.length" class="works-strip">
             <div v-for="w in works" :key="w.id" class="work">
@@ -453,7 +270,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-          <p v-else class="works-empty">暂无作品，生成后自动保存在本机</p>
+          <p v-else class="works-empty">暂无作品 · 保留最近 10 次生成，存本机</p>
         </div>
       </section>
     </div>
