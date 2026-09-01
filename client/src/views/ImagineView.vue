@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import Icon from '../components/Icon.vue'
 import { generateImage, generateImageEdit } from '../lib/image-generate'
 
@@ -129,6 +129,64 @@ function maxMentionedRef(promptText: string): number {
   return matches.length ? Math.max(...matches) : 0
 }
 
+/* ---------- @ 提及选择器：输入 @ 弹出参考图预览 ---------- */
+const promptEl = ref<HTMLTextAreaElement | null>(null)
+const mention = ref<{ start: number; query: string } | null>(null)
+let mentionBlurTimer: number | null = null
+
+const mentionFiltered = computed(() => {
+  const m = mention.value
+  if (!m) return []
+  return refs.value
+    .map((r, i) => ({ r, idx: i + 1 }))
+    .filter(({ idx }) => !m.query || String(idx).startsWith(m.query))
+})
+
+function updateMention(): void {
+  if (mode.value !== 'image' || !refs.value.length || !promptEl.value) {
+    mention.value = null
+    return
+  }
+  const pos = promptEl.value.selectionStart ?? prompt.value.length
+  const before = prompt.value.slice(0, pos)
+  const m = /@(?:图)?(\d{0,2})$/.exec(before)
+  mention.value = m ? { start: pos - m[0].length, query: m[1] || '' } : null
+}
+
+function pickMention(idx: number): void {
+  const m = mention.value
+  if (!m) return
+  const token = `@图${idx} `
+  const caretEnd = promptEl.value?.selectionStart ?? prompt.value.length
+  prompt.value = prompt.value.slice(0, m.start) + token + prompt.value.slice(caretEnd)
+  mention.value = null
+  void nextTick(() => {
+    const el = promptEl.value
+    if (!el) return
+    el.focus()
+    const caret = m.start + token.length
+    el.setSelectionRange(caret, caret)
+  })
+}
+
+function closeMention(): void {
+  mention.value = null
+}
+
+function onPromptBlur(): void {
+  mentionBlurTimer = window.setTimeout(() => {
+    mention.value = null
+    mentionBlurTimer = null
+  }, 150)
+}
+
+function onPromptFocus(): void {
+  if (mentionBlurTimer != null) {
+    window.clearTimeout(mentionBlurTimer)
+    mentionBlurTimer = null
+  }
+}
+
 async function generate(): Promise<void> {
   if (generating.value) return
   errorMsg.value = ''
@@ -231,6 +289,7 @@ function download(): void {
 
 onBeforeUnmount(() => {
   abortController?.abort()
+  if (mentionBlurTimer != null) window.clearTimeout(mentionBlurTimer)
   for (const item of refs.value) {
     if (item.url.startsWith('blob:')) URL.revokeObjectURL(item.url)
   }
@@ -260,13 +319,36 @@ onBeforeUnmount(() => {
           <span class="block-label">提示词</span>
           <div class="prompt-wrap">
             <textarea
+              ref="promptEl"
               v-model="prompt"
               class="prompt-input"
               maxlength="4000"
               aria-label="提示词"
-              :placeholder="mode === 'image' ? '描述画面，可用 @图1 @图2 指代对应参考图…' : '描述你想创造的画面…'"
+              :placeholder="mode === 'image' ? '描述画面，输入 @ 选择参考图…' : '描述你想创造的画面…'"
+              @input="updateMention"
+              @click="updateMention"
+              @keyup="updateMention"
+              @focus="onPromptFocus"
+              @blur="onPromptBlur"
+              @keydown.esc.prevent="closeMention"
             />
             <span class="counter">{{ prompt.length }}/4000</span>
+            <div v-if="mention && mentionFiltered.length" class="mention-pop" role="listbox" aria-label="选择参考图">
+              <button
+                v-for="{ r, idx } in mentionFiltered"
+                :key="r.key"
+                class="mention-item"
+                type="button"
+                role="option"
+                :aria-selected="false"
+                @mousedown.prevent
+                @click="pickMention(idx)"
+              >
+                <img :src="r.url" alt="" />
+                <span class="mention-tag">图{{ idx }}</span>
+                <span class="mention-name">{{ r.name }}</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -466,6 +548,69 @@ onBeforeUnmount(() => {
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
   pointer-events: none;
+}
+
+.mention-pop {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: calc(100% + 6px);
+  z-index: 40;
+  padding: 5px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(13, 20, 32, 0.97);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-pop);
+  max-height: 250px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: 9px;
+  text-align: left;
+  transition: background 0.14s var(--ease);
+}
+
+.mention-item:hover {
+  background: rgba(62, 123, 250, 0.12);
+}
+
+.mention-item img {
+  width: 38px;
+  height: 38px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
+
+.mention-tag {
+  padding: 1px 8px;
+  border-radius: var(--r-full);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--on-grad);
+  background: var(--grad-cta);
+  flex-shrink: 0;
+}
+
+.mention-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ref-grid {
