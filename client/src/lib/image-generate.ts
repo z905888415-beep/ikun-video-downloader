@@ -80,20 +80,22 @@ async function pollTask(taskId: string, onProgress?: (n: number) => void, signal
 export interface ImageEditRequest {
   prompt: string
   size: string
-  file: File
+  files: File[]
   signal?: AbortSignal
   onProgress?: (percent: number) => void
 }
 
-// 图生图：参考图必须走服务端 /v1/images/edits multipart（上游 generations 不认 image_urls）
+// 图生图：参考图必须走服务端 /v1/images/edits multipart（上游 generations 不认 image_urls）。
+// 支持多张参考图，按上传顺序传入；提示词里可用「@图N」对应第 N 张。
 export async function generateImageEdit(req: ImageEditRequest): Promise<string> {
   const prompt = req.prompt.trim()
   if (!prompt) throw new Error('请先描述你想创造的画面')
-  if (!req.file || !req.file.size) throw new Error('图生图需要先添加参考图')
+  const files = (req.files || []).filter((f) => f && f.size > 0)
+  if (!files.length) throw new Error('图生图需要先添加参考图')
 
   req.onProgress?.(8)
   const form = new FormData()
-  form.append('image', req.file)
+  for (const file of files) form.append('image', file)
   form.append('model', loadImageGenModel())
   form.append('prompt', prompt)
   form.append('n', '1')

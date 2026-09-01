@@ -16,9 +16,17 @@ const WORKS_MAX = 24
 const mode = ref<'text' | 'image'>('text')
 const prompt = ref('')
 const size = ref('1024x1024')
-const refUrl = ref('')
-const refName = ref('')
-let refFile: File | null = null
+
+interface RefItem {
+  key: string
+  name: string
+  url: string
+  file: File
+}
+
+const REFS_MAX = 4
+const refs = ref<RefItem[]>([])
+let refSeq = 0
 
 const generating = ref(false)
 const progress = ref(0)
@@ -46,51 +54,79 @@ function persistWorks(): void {
   }
 }
 
-function onPickRef(file?: File | null): void {
-  if (!file) return
-  if (!file.type.startsWith('image/')) {
-    errorMsg.value = '请选择图片文件作为参考图'
-    return
+function addRefFiles(files: Array<File | null | undefined>): void {
+  for (const file of files) {
+    if (!file) continue
+    if (!file.type.startsWith('image/')) {
+      errorMsg.value = '请选择图片文件作为参考图'
+      continue
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      errorMsg.value = '参考图不能超过 10MB'
+      continue
+    }
+    if (refs.value.length >= REFS_MAX) {
+      errorMsg.value = `最多添加 ${REFS_MAX} 张参考图`
+      break
+    }
+    errorMsg.value = ''
+    refSeq += 1
+    refs.value = [...refs.value, {
+      key: `ref_${Date.now()}_${refSeq}`,
+      name: file.name || `参考图${refs.value.length + 1}`,
+      url: URL.createObjectURL(file),
+      file
+    }]
   }
-  if (file.size > 10 * 1024 * 1024) {
-    errorMsg.value = '参考图不能超过 10MB'
-    return
-  }
-  errorMsg.value = ''
-  if (refUrl.value) URL.revokeObjectURL(refUrl.value)
-  refFile = file
-  refUrl.value = URL.createObjectURL(file)
-  refName.value = file.name
 }
 
 function onRefInput(e: Event): void {
-  onPickRef((e.target as HTMLInputElement).files?.[0])
+  addRefFiles([...((e.target as HTMLInputElement).files || [])])
+  ;(e.target as HTMLInputElement).value = ''
 }
 
 function onRefDrop(e: DragEvent): void {
-  onPickRef(e.dataTransfer?.files?.[0])
+  addRefFiles([...(e.dataTransfer?.files || [])])
 }
 
-function clearRef(): void {
-  if (refUrl.value) URL.revokeObjectURL(refUrl.value)
-  refFile = null
-  refUrl.value = ''
-  refName.value = ''
+function removeRef(key: string): void {
+  const item = refs.value.find((r) => r.key === key)
+  if (item?.url.startsWith('blob:')) URL.revokeObjectURL(item.url)
+  refs.value = refs.value.filter((r) => r.key !== key)
+}
+
+function addRefFromUrl(url: string, name: string): void {
+  if (refs.value.length >= REFS_MAX) {
+    errorMsg.value = `参考图已满 ${REFS_MAX} 张，已替换最后一张`
+    removeRef(refs.value[refs.value.length - 1].key)
+  }
+  refSeq += 1
+  refs.value = [...refs.value, { key: `ref_${Date.now()}_${refSeq}`, name, url, file: null as unknown as File }]
+}
+
+async function resolveRefFile(item: RefItem): Promise<File> {
+  if (item.file && item.file.size > 0) return item.file
+  const blob = await (await fetch(item.url)).blob()
+  const file = new File([blob], item.name, { type: blob.type || 'image/png' })
+  item.file = file
+  return file
 }
 
 async function setRefFromUrl(url: string): Promise<void> {
   try {
-    // fetch 支持 data: URL；统一转成有内容的 File（空 File 会被生成流程静默当成无参考图）
     const blob = await (await fetch(url)).blob()
-    refFile = new File([blob], 'generated.png', { type: blob.type || 'image/png' })
-    if (refUrl.value && refUrl.value !== url) URL.revokeObjectURL(refUrl.value)
-    refUrl.value = url.startsWith('data:') ? url : URL.createObjectURL(blob)
-    refName.value = '上一次生成'
+    const file = new File([blob], 'generated.png', { type: blob.type || 'image/png' })
+    addRefFiles([file])
     mode.value = 'image'
-    statusText.value = '已设为参考图，改改提示词再生成'
+    statusText.value = `已添加为 图${refs.value.length}，可用 @图${refs.value.length} 指代它`
   } catch {
     errorMsg.value = '参考图获取失败'
   }
+}
+
+function maxMentionedRef(promptText: string): number {
+  const matches = [...promptText.matchAll(/@图\s*(\d{1,2})/g)].map((m) => Number(m[1]))
+  return matches.length ? Math.max(...matches) : 0
 }
 
 async function generate(): Promise<void> {
@@ -100,10 +136,17 @@ async function generate(): Promise<void> {
     errorMsg.value = '请先描述你想创造的画面'
     return
   }
-  if (mode.value === 'image' && !refFile) {
+  if (mode.value === 'image' && !refs.value.length) {
     errorMsg.value = '图生图需要先添加参考图'
     return
   }
+  const mentioned = maxMentionedRef(prompt.value)
+  if (mode.value === 'image' && mentioned > refs.value.length) {
+    errorMsg.value = `提示词里引用了 @图${mentioned}，但只添加了 ${refs.value.length} 张参考图`
+    return
+  }
+  // 发送前把 @图N 替换成模型更易理解的「第N张参考图」
+  const sentPrompt = prompt.value.replace(/@图\s*(\d{1,2})/g, '第$1张参考图')
   generating.value = true
   progress.value = 4
   statusText.value = '正在提交生图任务…'
@@ -116,10 +159,12 @@ async function generate(): Promise<void> {
     }
     let url: string
     if (mode.value === 'image') {
+      const files = []
+      for (const item of refs.value) files.push(await resolveRefFile(item))
       url = await generateImageEdit({
-        prompt: prompt.value,
+        prompt: sentPrompt,
         size: size.value,
-        file: refFile as File,
+        files,
         signal: abortController.signal,
         onProgress
       })
@@ -186,7 +231,9 @@ function download(): void {
 
 onBeforeUnmount(() => {
   abortController?.abort()
-  if (refUrl.value) URL.revokeObjectURL(refUrl.value)
+  for (const item of refs.value) {
+    if (item.url.startsWith('blob:')) URL.revokeObjectURL(item.url)
+  }
 })
 </script>
 
@@ -217,36 +264,29 @@ onBeforeUnmount(() => {
               class="prompt-input"
               maxlength="4000"
               aria-label="提示词"
-              placeholder="描述你想创造的画面…"
+              :placeholder="mode === 'image' ? '描述画面，可用 @图1 @图2 指代对应参考图…' : '描述你想创造的画面…'"
             />
             <span class="counter">{{ prompt.length }}/4000</span>
           </div>
         </div>
 
         <div v-if="mode === 'image'" class="block">
-          <label
-            class="ref-slot"
-            :class="{ filled: !!refUrl }"
-            @dragover.prevent
-            @drop.prevent="onRefDrop"
-          >
-            <input type="file" accept="image/jpeg,image/png,image/webp" @change="onRefInput" />
-            <template v-if="refUrl">
-              <img :src="refUrl" alt="参考图" />
-              <div class="ref-copy">
-                <strong>{{ refName }}</strong>
-                <small>点击或拖拽替换</small>
-              </div>
-              <button class="btn btn-ghost btn-sm" type="button" @click.stop.prevent="clearRef">移除</button>
-            </template>
-            <template v-else>
-              <span class="ref-plus"><Icon name="plus" :size="18" /></span>
-              <div class="ref-copy">
-                <strong>添加参考图</strong>
-                <small>拖拽或点击，按参考图重绘</small>
-              </div>
-            </template>
-          </label>
+          <span class="block-label">参考图 · 最多 {{ REFS_MAX }} 张，用 @图1 @图2 指代</span>
+          <div class="ref-grid" @dragover.prevent @drop.prevent="onRefDrop">
+            <div v-for="(r, i) in refs" :key="r.key" class="ref-item" :title="r.name">
+              <img :src="r.url" :alt="`参考图${i + 1}`" />
+              <span class="ref-badge">图{{ i + 1 }}</span>
+              <button class="ref-del" type="button" aria-label="移除参考图" @click="removeRef(r.key)">
+                <Icon name="x" :size="12" />
+              </button>
+            </div>
+            <label v-if="refs.length < REFS_MAX" class="ref-add">
+              <input type="file" accept="image/jpeg,image/png,image/webp" multiple @change="onRefInput" />
+              <Icon name="plus" :size="20" />
+              <span>添加</span>
+            </label>
+          </div>
+          <small class="ref-hint">拖拽或点击添加；在提示词里用 @图1 @图2 指代对应参考图</small>
         </div>
 
         <div class="block">
@@ -428,66 +468,93 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.ref-slot {
+.ref-grid {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 72px;
-  padding: 12px 16px;
-  border: 1.5px dashed var(--border-strong);
-  border-radius: var(--r-md);
-  background: rgba(11, 17, 33, 0.4);
-  cursor: pointer;
-  color: var(--text-2);
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
-.ref-slot input {
+.ref-item {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface-input);
+}
+
+.ref-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ref-badge {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  padding: 1px 7px;
+  border-radius: var(--r-full);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--on-grad);
+  background: var(--grad-cta);
+  box-shadow: 0 2px 8px rgba(46, 107, 246, 0.45);
+}
+
+.ref-del {
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(4, 10, 22, 0.72);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(163, 190, 255, 0.16);
+  opacity: 0;
+  transition: opacity 0.15s var(--ease);
+}
+
+.ref-item:hover .ref-del {
+  opacity: 1;
+}
+
+.ref-add {
+  width: 84px;
+  height: 84px;
+  border-radius: 12px;
+  border: 1.5px dashed var(--border-strong);
+  background: rgba(11, 17, 33, 0.4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--accent-hover);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.ref-add input {
   display: none;
 }
 
-.ref-slot:hover,
-.ref-slot.filled {
-  border-color: var(--accent-border);
+.ref-add:hover {
+  border-color: var(--accent);
   background: rgba(62, 123, 250, 0.05);
 }
 
-.ref-slot img {
-  width: 56px;
-  height: 56px;
-  object-fit: cover;
-  border-radius: 10px;
-  flex-shrink: 0;
-}
-
-.ref-plus {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  color: var(--accent-hover);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-border);
-  flex-shrink: 0;
-}
-
-.ref-copy {
-  flex: 1;
-  min-width: 0;
-}
-
-.ref-copy strong {
-  display: block;
-  font-size: 13.5px;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ref-copy small {
+.ref-hint {
   color: var(--text-3);
   font-size: 12px;
+  line-height: 1.6;
 }
 
 .size-chips {
