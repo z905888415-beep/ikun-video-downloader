@@ -345,9 +345,7 @@ app.post('/api/ai/images/generations', aiRateLimit, async (req, res) => {
       size: String(req.body?.size || '1024x1024'),
       resolution: String(req.body?.resolution || '2K')
     }
-    if (Array.isArray(req.body?.image_urls) && req.body.image_urls[0]) {
-      payload.image_urls = [String(req.body.image_urls[0]).slice(0, 12_000_000)]
-    }
+    // 实测：上游 generations 会静默忽略 image_urls，图生图必须走 /v1/images/edits
     const upstream = await proxyImageApi(`${apiUrl}/v1/images/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
@@ -367,6 +365,39 @@ app.post('/api/ai/images/generations', aiRateLimit, async (req, res) => {
     if (error.name === 'AbortError') return res.status(504).json({ error: '生图请求超时' })
     console.error('[ai/images/generations]', error)
     res.status(502).json({ error: error.message || '生图代理失败' })
+  }
+})
+
+// 图生图：multipart 直通上游 /v1/images/edits（参考图必须走 edits，generations 不认图）
+app.post('/api/ai/images/edits', aiRateLimit, async (req, res) => {
+  try {
+    const apiUrl = assertPublicHttpsApi(IMAGE_API_BASE_URL)
+    if (!IMAGE_API_KEY) return res.status(503).json({ error: '生图服务未配置，请联系管理员', code: 'IMAGE_API_UNCONFIGURED' })
+    const contentType = String(req.headers['content-type'] || '')
+    if (!contentType.toLowerCase().includes('multipart/form-data')) {
+      return res.status(400).json({ error: '请使用 multipart/form-data 上传参考图（字段名 image）' })
+    }
+    const body = await readRequestBody(req)
+    if (!body.length) return res.status(400).json({ error: '空请求体' })
+    const upstream = await proxyImageApi(`${apiUrl}/v1/images/edits`, {
+      method: 'POST',
+      headers: { 'Content-Type': contentType, Authorization: `Bearer ${IMAGE_API_KEY}`, Accept: 'application/json' },
+      body,
+      timeoutMs: 300000
+    })
+    const text = await upstream.text()
+    let data = {}
+    try {
+      data = JSON.parse(text)
+    } catch {
+      data = { error: text.slice(0, 200) || `上游错误（${upstream.status}）` }
+    }
+    res.status(upstream.ok ? 200 : upstream.status).json(data)
+  } catch (error) {
+    if (error.status === 413) return res.status(413).json({ error: error.message })
+    if (error.name === 'AbortError') return res.status(504).json({ error: '生图请求超时' })
+    console.error('[ai/images/edits]', error)
+    res.status(502).json({ error: error.message || '图生图代理失败' })
   }
 })
 

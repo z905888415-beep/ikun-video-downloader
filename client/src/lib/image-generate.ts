@@ -11,7 +11,6 @@ export interface ImageGenRequest {
   prompt: string
   size: string
   resolution?: string
-  imageDataUrl?: string
   signal?: AbortSignal
   onProgress?: (percent: number) => void
 }
@@ -78,6 +77,51 @@ async function pollTask(taskId: string, onProgress?: (n: number) => void, signal
   throw new Error('生成超时，请稍后重试')
 }
 
+export interface ImageEditRequest {
+  prompt: string
+  size: string
+  file: File
+  signal?: AbortSignal
+  onProgress?: (percent: number) => void
+}
+
+// 图生图：参考图必须走服务端 /v1/images/edits multipart（上游 generations 不认 image_urls）
+export async function generateImageEdit(req: ImageEditRequest): Promise<string> {
+  const prompt = req.prompt.trim()
+  if (!prompt) throw new Error('请先描述你想创造的画面')
+  if (!req.file || !req.file.size) throw new Error('图生图需要先添加参考图')
+
+  req.onProgress?.(8)
+  const form = new FormData()
+  form.append('image', req.file)
+  form.append('model', loadImageGenModel())
+  form.append('prompt', prompt)
+  form.append('n', '1')
+  if (req.size) form.append('size', req.size)
+
+  const res = await fetch('/api/ai/images/edits', {
+    method: 'POST',
+    body: form,
+    signal: req.signal
+  })
+  const payload = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(errorMessage(payload, `API 请求失败（${res.status}）`))
+
+  const direct = extractImageUrl(payload)
+  if (direct) {
+    req.onProgress?.(100)
+    return direct
+  }
+  const taskId = extractTaskId(payload)
+  if (taskId) {
+    req.onProgress?.(12)
+    const url = await pollTask(taskId, req.onProgress, req.signal)
+    req.onProgress?.(100)
+    return url
+  }
+  throw new Error(errorMessage(payload, 'API 没有返回图片'))
+}
+
 export async function generateImage(req: ImageGenRequest): Promise<string> {
   const prompt = req.prompt.trim()
   if (!prompt) throw new Error('请先描述你想创造的画面')
@@ -90,7 +134,6 @@ export async function generateImage(req: ImageGenRequest): Promise<string> {
     size: req.size
   }
   if (req.resolution) body.resolution = req.resolution
-  if (req.imageDataUrl) body.image_urls = [req.imageDataUrl]
 
   const res = await fetch('/api/ai/images/generations', {
     method: 'POST',

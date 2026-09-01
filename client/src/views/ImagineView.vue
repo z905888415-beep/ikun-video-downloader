@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue'
 import Icon from '../components/Icon.vue'
-import { generateImage } from '../lib/image-generate'
+import { generateImage, generateImageEdit } from '../lib/image-generate'
 
 interface Work {
   id: string
@@ -78,27 +78,13 @@ function clearRef(): void {
   refName.value = ''
 }
 
-async function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(new Error('读取参考图失败'))
-    reader.readAsDataURL(file)
-  })
-}
-
 async function setRefFromUrl(url: string): Promise<void> {
   try {
-    if (url.startsWith('data:')) {
-      refFile = new File([], 'generated.png', { type: 'image/png' })
-      refUrl.value = url
-      refName.value = '上一次生成'
-      return
-    }
+    // fetch 支持 data: URL；统一转成有内容的 File（空 File 会被生成流程静默当成无参考图）
     const blob = await (await fetch(url)).blob()
     refFile = new File([blob], 'generated.png', { type: blob.type || 'image/png' })
-    if (refUrl.value) URL.revokeObjectURL(refUrl.value)
-    refUrl.value = URL.createObjectURL(blob)
+    if (refUrl.value && refUrl.value !== url) URL.revokeObjectURL(refUrl.value)
+    refUrl.value = url.startsWith('data:') ? url : URL.createObjectURL(blob)
     refName.value = '上一次生成'
     mode.value = 'image'
     statusText.value = '已设为参考图，改改提示词再生成'
@@ -124,20 +110,27 @@ async function generate(): Promise<void> {
   resultUrl.value = ''
   abortController = new AbortController()
   try {
-    let imageDataUrl = ''
-    if (mode.value === 'image' && refFile && refFile.size) {
-      imageDataUrl = await fileToDataUrl(refFile)
+    const onProgress = (p: number): void => {
+      progress.value = p
+      statusText.value = p >= 100 ? '生成完成' : `生成中 ${Math.round(p)}%`
     }
-    const url = await generateImage({
-      prompt: prompt.value,
-      size: size.value,
-      imageDataUrl: imageDataUrl || undefined,
-      signal: abortController.signal,
-      onProgress: (p) => {
-        progress.value = p
-        statusText.value = p >= 100 ? '生成完成' : `生成中 ${Math.round(p)}%`
-      }
-    })
+    let url: string
+    if (mode.value === 'image') {
+      url = await generateImageEdit({
+        prompt: prompt.value,
+        size: size.value,
+        file: refFile as File,
+        signal: abortController.signal,
+        onProgress
+      })
+    } else {
+      url = await generateImage({
+        prompt: prompt.value,
+        size: size.value,
+        signal: abortController.signal,
+        onProgress
+      })
+    }
     resultUrl.value = url
     progress.value = 100
     statusText.value = '图片已就绪'
