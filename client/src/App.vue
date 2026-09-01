@@ -3,6 +3,7 @@ import { onMounted } from 'vue'
 import { useAppStore, type PageId } from './stores/app'
 import Icon from './components/Icon.vue'
 import HomeView from './views/HomeView.vue'
+import ImagineView from './views/ImagineView.vue'
 import ToolboxView from './views/ToolboxView.vue'
 import HistoryView from './views/HistoryView.vue'
 import SettingsView from './views/SettingsView.vue'
@@ -11,6 +12,7 @@ const store = useAppStore()
 
 const pages: { id: PageId; label: string; short: string; icon: string }[] = [
   { id: 'home', label: '解析与下载', short: '解析', icon: 'sparkles' },
+  { id: 'imagine', label: 'AI 生图', short: '生图', icon: 'image' },
   { id: 'tools', label: '工具箱', short: '工具', icon: 'grid' },
   { id: 'history', label: '历史记录', short: '历史', icon: 'clock' },
   { id: 'settings', label: '服务状态', short: '状态', icon: 'sliders' }
@@ -71,6 +73,7 @@ onMounted(() => {
 
         <Transition name="page" mode="out-in">
           <HomeView v-if="store.page === 'home'" key="home" />
+          <ImagineView v-else-if="store.page === 'imagine'" key="imagine" />
           <ToolboxView v-else-if="store.page === 'tools'" key="tools" />
           <HistoryView v-else-if="store.page === 'history'" key="history" />
           <SettingsView v-else key="settings" />

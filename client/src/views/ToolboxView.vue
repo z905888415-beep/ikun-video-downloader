@@ -8,12 +8,11 @@ import { jsPDF } from 'jspdf'
 import { Archive, ArchiveCompression, ArchiveFormat } from 'libarchive.js/dist/libarchive.js'
 import Icon from '../components/Icon.vue'
 import { api } from '../api/client'
-import { generateImage, loadImageGenModel, saveImageGenModel, IMAGE_MODELS } from '../lib/image-generate'
 
-type ToolMode = 'imagine' | 'cutout' | 'archive' | 'video' | 'gif' | 'image' | 'pdf'
+type ToolMode = 'cutout' | 'archive' | 'video' | 'gif' | 'image' | 'pdf'
 type Preset = 'quality' | 'balanced' | 'tiny'
 
-const mode = ref<ToolMode>('imagine')
+const mode = ref<ToolMode>('archive')
 const files = ref<File[]>([])
 const busy = ref(false)
 const progress = ref(0)
@@ -49,23 +48,6 @@ const cutoutSourceUrl = ref('')
 const cutoutBlob = ref<Blob | null>(null)
 const cutoutName = ref('cutout.png')
 const aiStatusText = ref('')
-const imaginePrompt = ref('')
-const imagineSize = ref('1024x1024')
-const imagineResolution = ref('2K')
-const imagineModel = ref(loadImageGenModel())
-const imagineResultUrl = ref('')
-const imagineRefName = ref('')
-const imagineRefUrl = ref('')
-let imagineAbort: AbortController | null = null
-
-const imagineSizes = [
-  { id: '1024x1024', ratio: '1:1', w: 22, h: 22 },
-  { id: '1536x864', ratio: '16:9', w: 28, h: 16 },
-  { id: '864x1536', ratio: '9:16', w: 16, h: 28 },
-  { id: '1536x1024', ratio: '3:2', w: 27, h: 18 },
-  { id: '1024x1536', ratio: '2:3', w: 18, h: 27 }
-] as const
-const imagineResolutions = ['1K', '2K', '4K'] as const
 
 const maxGifStart = computed(() => Math.max(0, videoDuration.value - 0.5))
 const maxGifDuration = computed(() => Math.min(30, Math.max(0.5, videoDuration.value ? videoDuration.value - gifStart.value : 30)))
@@ -76,7 +58,6 @@ let ffmpeg: FFmpeg | null = null
 let archiveReady = false
 
 const tabs = [
-  { id: 'imagine' as const, title: 'AI 生图', sub: 'GPT-Image-2 · 文生图 / 图生图', icon: 'sparkles', wide: true },
   { id: 'cutout' as const, title: 'AI 抠图', sub: '远程 miaoCut · 透明 PNG', icon: 'image', wide: true },
   { id: 'archive' as const, title: '压缩包', sub: 'zip / 7z / rar / tar.gz', icon: 'archive', wide: true },
   { id: 'video' as const, title: '视频压缩', sub: 'ffmpeg.wasm 本地处理', icon: 'video', wide: false },
@@ -327,106 +308,10 @@ watch([cropX, cropY, cropW, cropH, gifWidth, captionText, captionSize, captionCo
   window.setTimeout(drawPreview, 80)
 })
 
-function persistImagineCfg(): void {
-  saveImageGenModel(imagineModel.value)
-}
-
-function clearImagineRef(): void {
-  if (imagineRefUrl.value) URL.revokeObjectURL(imagineRefUrl.value)
-  imagineRefUrl.value = ''
-  imagineRefName.value = ''
-}
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(new Error('读取参考图失败'))
-    reader.readAsDataURL(file)
-  })
-}
-
-function onImagineRef(file?: File | null): void {
-  if (!file) return
-  if (!file.type.startsWith('image/')) {
-    message.value = '请选择图片作为参考图'
-    return
-  }
-  if (file.size > 10 * 1024 * 1024) {
-    message.value = '参考图不能超过 10MB'
-    return
-  }
-  if (imagineRefUrl.value) URL.revokeObjectURL(imagineRefUrl.value)
-  imagineRefUrl.value = URL.createObjectURL(file)
-  imagineRefName.value = file.name
-}
-
-function dropImagine(e: DragEvent): void {
-  onImagineRef(e.dataTransfer?.files?.[0])
-}
-
-function pickImagine(e: Event): void {
-  onImagineRef((e.target as HTMLInputElement).files?.[0])
-}
-
-function downloadImagine(): void {
-  if (!imagineResultUrl.value) return
-  const a = document.createElement('a')
-  a.href = imagineResultUrl.value
-  a.download = `ikun-${Date.now()}.png`
-  a.rel = 'noopener'
-  a.click()
-}
-
-async function runImagine(): Promise<void> {
-  persistImagineCfg()
-  imagineAbort?.abort()
-  imagineAbort = new AbortController()
-  busy.value = true
-  progress.value = 4
-  message.value = '正在提交生图任务…'
-  imagineResultUrl.value = ''
-  try {
-    let imageDataUrl = ''
-    if (imagineRefUrl.value) {
-      const blob = await fetch(imagineRefUrl.value).then((r) => r.blob())
-      const file = new File([blob], imagineRefName.value || 'ref.png', { type: blob.type || 'image/png' })
-      imageDataUrl = await fileToDataUrl(file)
-    }
-    const url = await generateImage({
-      model: imagineModel.value,
-      prompt: imaginePrompt.value,
-      size: imagineSize.value,
-      resolution: imagineResolution.value,
-      imageDataUrl: imageDataUrl || undefined,
-      signal: imagineAbort.signal,
-      onProgress: (p) => {
-        progress.value = p
-        message.value = p >= 100 ? '生成完成' : `生成中 ${Math.round(p)}%`
-      }
-    })
-    imagineResultUrl.value = url
-    progress.value = 100
-    message.value = '生成完成'
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      message.value = '已取消'
-    } else {
-      message.value = error instanceof Error ? error.message : String(error)
-      progress.value = 0
-    }
-  } finally {
-    busy.value = false
-    imagineAbort = null
-  }
-}
-
 onBeforeUnmount(() => {
-  imagineAbort?.abort()
   if (cutoutPreviewUrl.value) URL.revokeObjectURL(cutoutPreviewUrl.value)
   if (cutoutSourceUrl.value) URL.revokeObjectURL(cutoutSourceUrl.value)
   if (videoObjectUrl.value) URL.revokeObjectURL(videoObjectUrl.value)
-  if (imagineRefUrl.value) URL.revokeObjectURL(imagineRefUrl.value)
 })
 
 async function videoToGif(): Promise<void> {
@@ -630,7 +515,7 @@ async function runPdf(): Promise<void> {
   <div class="toolbox-view">
     <div class="page-head">
       <h2>工具箱</h2>
-      <p>本地工具在浏览器内处理；AI 生图走你自己的中转 API；抠图经本机转发到远程 miaoCut。</p>
+      <p>本地工具在浏览器内处理；AI 能力经本机服务转发，不经过你的业务存储。</p>
     </div>
 
     <!-- Bento 工具网格 -->
@@ -653,7 +538,7 @@ async function runPdf(): Promise<void> {
     </div>
 
     <!-- 文件拖拽区（生图工具用自己的参考图槽，不走通用拖拽） -->
-    <label v-if="mode !== 'imagine'" class="drop-card" :class="{ filled: files.length }" @dragover.prevent @drop.prevent="drop">
+    <label class="drop-card" :class="{ filled: files.length }" @dragover.prevent @drop.prevent="drop">
       <input
         :multiple="mode !== 'cutout'"
         type="file"
@@ -673,111 +558,8 @@ async function runPdf(): Promise<void> {
       </small>
     </label>
 
-    <!-- AI 生图 -->
-    <section v-if="mode === 'imagine'" class="card card-pad tool-panel imagine-panel rise-in">
-      <div class="imagine-head">
-        <h3 class="card-title">AI 生图</h3>
-        <span class="imagine-mode-tag">{{ imagineRefUrl ? '图生图' : '文生图' }} · {{ imagineResolution }}</span>
-      </div>
-
-      <textarea
-        v-model="imaginePrompt"
-        class="imagine-prompt"
-        maxlength="4000"
-        aria-label="描述画面"
-        placeholder="描述你想创造的画面…"
-      />
-
-      <div class="imagine-row">
-        <span class="imagine-label">画幅</span>
-        <div class="imagine-sizes" role="radiogroup" aria-label="画幅">
-          <button
-            v-for="s in imagineSizes"
-            :key="s.id"
-            class="imagine-size"
-            :class="{ active: imagineSize === s.id }"
-            type="button"
-            role="radio"
-            :aria-checked="imagineSize === s.id"
-            @click="imagineSize = s.id"
-          >
-            <i class="imagine-size-box" :style="{ width: s.w + 'px', height: s.h + 'px' }" />
-            {{ s.ratio }}
-          </button>
-        </div>
-      </div>
-
-      <div class="imagine-row">
-        <span class="imagine-label">清晰度</span>
-        <div class="preset-pills">
-          <button
-            v-for="r in imagineResolutions"
-            :key="r"
-            class="preset-pill"
-            :class="{ active: imagineResolution === r }"
-            type="button"
-            @click="imagineResolution = r"
-          >
-            {{ r }}
-          </button>
-        </div>
-      </div>
-
-      <label class="imagine-drop" :class="{ filled: !!imagineRefUrl }" @dragover.prevent @drop.prevent="dropImagine">
-        <input type="file" accept="image/jpeg,image/png,image/webp" @change="pickImagine" />
-        <template v-if="imagineRefUrl">
-          <img :src="imagineRefUrl" alt="参考图" />
-          <div class="imagine-drop-copy">
-            <strong>{{ imagineRefName }}</strong>
-            <small>点击或拖拽替换</small>
-          </div>
-          <button class="btn btn-ghost btn-sm" type="button" @click.stop.prevent="clearImagineRef">移除</button>
-        </template>
-        <template v-else>
-          <span class="imagine-drop-plus"><Icon name="plus" :size="18" /></span>
-          <div class="imagine-drop-copy">
-            <strong>添加参考图</strong>
-            <small>可选 · 拖拽或点击，走图生图</small>
-          </div>
-        </template>
-      </label>
-
-      <div class="imagine-row">
-        <span class="imagine-label">模型</span>
-        <div class="preset-pills" role="radiogroup" aria-label="模型">
-          <button
-            v-for="m in IMAGE_MODELS"
-            :key="m.id"
-            class="preset-pill"
-            :class="{ active: imagineModel === m.id }"
-            type="button"
-            role="radio"
-            :aria-checked="imagineModel === m.id"
-            @click="imagineModel = m.id; persistImagineCfg()"
-          >
-            {{ m.label }}
-          </button>
-        </div>
-      </div>
-
-      <div class="imagine-actions">
-        <button class="btn btn-primary" type="button" :disabled="busy || !imaginePrompt.trim()" @click="runImagine">
-          <Icon name="sparkles" :size="15" />
-          {{ busy ? '生成中' : '生成图片' }}
-        </button>
-        <button v-if="busy" class="btn btn-ghost" type="button" @click="imagineAbort?.abort()">取消</button>
-        <button v-if="imagineResultUrl" class="btn btn-light" type="button" @click="downloadImagine">
-          <Icon name="download" :size="15" />下载
-        </button>
-      </div>
-
-      <div v-if="imagineResultUrl" class="imagine-result">
-        <img :src="imagineResultUrl" alt="生成结果" />
-      </div>
-    </section>
-
     <!-- AI 抠图 -->
-    <section v-else-if="mode === 'cutout'" class="card card-pad tool-panel rise-in">
+    <section v-if="mode === 'cutout'" class="card card-pad tool-panel rise-in">
       <h3 class="card-title">AI 抠图 · 透明 PNG</h3>
       <div class="preset-pills" style="margin-top: 14px">
         <button
@@ -1246,184 +1028,6 @@ async function runPdf(): Promise<void> {
 .tool-note code {
   color: var(--accent);
   font-size: 12px;
-}
-
-.imagine-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.imagine-mode-tag {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
-}
-
-.imagine-prompt {
-  width: 100%;
-  min-height: 132px;
-  resize: vertical;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface-input);
-  color: var(--text);
-  font-size: 15px;
-  line-height: 1.65;
-  box-shadow: inset 0 1px 3px rgba(1, 3, 9, 0.35);
-}
-
-.imagine-prompt::placeholder {
-  color: var(--text-3);
-}
-
-.imagine-prompt:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3.5px var(--accent-glow);
-}
-
-.imagine-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-top: 16px;
-  flex-wrap: wrap;
-}
-
-.imagine-label {
-  width: 48px;
-  flex-shrink: 0;
-  font-size: 12px;
-  font-weight: 650;
-  color: var(--text-3);
-}
-
-.imagine-sizes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.imagine-size {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 6px 12px 6px 10px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: rgba(3, 7, 17, 0.4);
-  color: var(--text-2);
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.imagine-size:hover {
-  color: var(--text);
-  border-color: var(--border-strong);
-}
-
-.imagine-size.active {
-  color: #fff;
-  border-color: transparent;
-  background: var(--grad-cta);
-  box-shadow: 0 4px 16px rgba(46, 107, 246, 0.35);
-}
-
-.imagine-size-box {
-  display: block;
-  border: 1.5px solid currentColor;
-  border-radius: 3px;
-  opacity: 0.85;
-  flex-shrink: 0;
-}
-
-.imagine-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 16px;
-}
-
-.imagine-drop {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 16px;
-  min-height: 72px;
-  padding: 12px 16px;
-  border: 1.5px dashed var(--border-strong);
-  border-radius: var(--r-md);
-  background: rgba(11, 17, 33, 0.4);
-  cursor: pointer;
-  color: var(--text-2);
-}
-
-.imagine-drop input {
-  display: none;
-}
-
-.imagine-drop:hover,
-.imagine-drop.filled {
-  border-color: var(--accent-border);
-  background: rgba(62, 123, 250, 0.05);
-}
-
-.imagine-drop-plus {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  color: var(--accent-hover);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-border);
-  flex-shrink: 0;
-}
-
-.imagine-drop img {
-  width: 56px;
-  height: 56px;
-  object-fit: cover;
-  border-radius: 10px;
-  flex-shrink: 0;
-}
-
-.imagine-drop-copy {
-  flex: 1;
-  min-width: 0;
-}
-
-.imagine-drop-copy strong {
-  display: block;
-  font-size: 13.5px;
-  color: var(--text);
-}
-
-.imagine-drop-copy small {
-  color: var(--text-3);
-  font-size: 12px;
-}
-
-.imagine-result {
-  margin-top: 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  overflow: hidden;
-  background: rgba(3, 7, 17, 0.45);
-}
-
-.imagine-result img {
-  width: 100%;
-  max-height: 640px;
-  object-fit: contain;
-  display: block;
 }
 
 .cutout-preview {
