@@ -8,7 +8,7 @@ import { jsPDF } from 'jspdf'
 import { Archive, ArchiveCompression, ArchiveFormat } from 'libarchive.js/dist/libarchive.js'
 import Icon from '../components/Icon.vue'
 import { api } from '../api/client'
-import { generateImage, loadImageGenConfig, saveImageGenConfig } from '../lib/image-generate'
+import { generateImage, loadImageGenModel, saveImageGenModel, IMAGE_MODELS } from '../lib/image-generate'
 
 type ToolMode = 'imagine' | 'cutout' | 'archive' | 'video' | 'gif' | 'image' | 'pdf'
 type Preset = 'quality' | 'balanced' | 'tiny'
@@ -52,19 +52,11 @@ const aiStatusText = ref('')
 const imaginePrompt = ref('')
 const imagineSize = ref('1024x1024')
 const imagineResolution = ref('2K')
-const imagineApiUrl = ref('')
-const imagineApiKey = ref('')
-const imagineModel = ref('gpt-image-2')
+const imagineModel = ref(loadImageGenModel())
 const imagineResultUrl = ref('')
 const imagineRefName = ref('')
 const imagineRefUrl = ref('')
 let imagineAbort: AbortController | null = null
-
-const imagineCfg = loadImageGenConfig()
-imagineApiUrl.value = imagineCfg.apiUrl
-imagineApiKey.value = imagineCfg.apiKey
-imagineModel.value = imagineCfg.model
-const imagineApiOpen = ref(!imagineApiKey.value)
 
 const imagineSizes = [
   { id: '1024x1024', ratio: '1:1', w: 22, h: 22 },
@@ -336,11 +328,7 @@ watch([cropX, cropY, cropW, cropH, gifWidth, captionText, captionSize, captionCo
 })
 
 function persistImagineCfg(): void {
-  saveImageGenConfig({
-    apiUrl: imagineApiUrl.value,
-    apiKey: imagineApiKey.value,
-    model: imagineModel.value
-  })
+  saveImageGenModel(imagineModel.value)
 }
 
 function clearImagineRef(): void {
@@ -406,6 +394,7 @@ async function runImagine(): Promise<void> {
       imageDataUrl = await fileToDataUrl(file)
     }
     const url = await generateImage({
+      model: imagineModel.value,
       prompt: imaginePrompt.value,
       size: imagineSize.value,
       resolution: imagineResolution.value,
@@ -753,6 +742,24 @@ async function runPdf(): Promise<void> {
         </template>
       </label>
 
+      <div class="imagine-row">
+        <span class="imagine-label">模型</span>
+        <div class="preset-pills" role="radiogroup" aria-label="模型">
+          <button
+            v-for="m in IMAGE_MODELS"
+            :key="m.id"
+            class="preset-pill"
+            :class="{ active: imagineModel === m.id }"
+            type="button"
+            role="radio"
+            :aria-checked="imagineModel === m.id"
+            @click="imagineModel = m.id; persistImagineCfg()"
+          >
+            {{ m.label }}
+          </button>
+        </div>
+      </div>
+
       <div class="imagine-actions">
         <button class="btn btn-primary" type="button" :disabled="busy || !imaginePrompt.trim()" @click="runImagine">
           <Icon name="sparkles" :size="15" />
@@ -762,25 +769,6 @@ async function runPdf(): Promise<void> {
         <button v-if="imagineResultUrl" class="btn btn-light" type="button" @click="downloadImagine">
           <Icon name="download" :size="15" />下载
         </button>
-        <button class="btn btn-ghost imagine-cfg-toggle" type="button" @click="imagineApiOpen = !imagineApiOpen">
-          API 设置
-          <Icon name="chevronDown" :size="14" :class="{ rotated: imagineApiOpen }" />
-        </button>
-      </div>
-
-      <div v-if="imagineApiOpen" class="imagine-cfg">
-        <label class="field" style="margin-bottom: 0">
-          <span>API 地址</span>
-          <input v-model="imagineApiUrl" class="input" type="url" placeholder="https://api.apimart.ai" @change="persistImagineCfg" />
-        </label>
-        <label class="field" style="margin-bottom: 0">
-          <span>密钥</span>
-          <input v-model="imagineApiKey" class="input" type="password" placeholder="sk-…" autocomplete="off" @change="persistImagineCfg" />
-        </label>
-        <label class="field" style="margin-bottom: 0">
-          <span>模型</span>
-          <input v-model="imagineModel" class="input" type="text" placeholder="gpt-image-2" @change="persistImagineCfg" />
-        </label>
       </div>
 
       <div v-if="imagineResultUrl" class="imagine-result">
@@ -1240,14 +1228,6 @@ async function runPdf(): Promise<void> {
   .bento {
     grid-template-columns: 1fr 1fr;
   }
-
-  .imagine-cfg {
-    grid-template-columns: 1fr;
-  }
-
-  .imagine-cfg-toggle {
-    margin-left: 0;
-  }
 }
 
 @media (max-width: 480px) {
@@ -1369,27 +1349,6 @@ async function runPdf(): Promise<void> {
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 16px;
-}
-
-.imagine-cfg-toggle {
-  margin-left: auto;
-}
-
-.imagine-cfg-toggle svg {
-  transition: transform 0.2s var(--ease);
-}
-
-.imagine-cfg-toggle svg.rotated {
-  transform: rotate(180deg);
-}
-
-.imagine-cfg {
-  display: grid;
-  grid-template-columns: 1.2fr 1fr 0.8fr;
-  gap: 12px;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
 }
 
 .imagine-drop {

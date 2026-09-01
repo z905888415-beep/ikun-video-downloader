@@ -1,34 +1,28 @@
-const CFG_URL = 'ikun_image_api_url'
-const CFG_KEY = 'ikun_image_api_key'
 const CFG_MODEL = 'ikun_image_model'
 
-export interface ImageGenConfig {
-  apiUrl: string
-  apiKey: string
-  model: string
+// 端点与密钥由 iKun 服务端内置（/etc/ikun-web.env 的 IMAGE_API_*），前端只选模型。
+export const IMAGE_MODELS = [
+  { id: 'gpt-image-2', label: 'GPT-Image-2' },
+  { id: 'grok-imagine-image-quality', label: 'Grok 生图' }
+] as const
+
+export function loadImageGenModel(): string {
+  const saved = localStorage.getItem(CFG_MODEL)
+  return IMAGE_MODELS.some((m) => m.id === saved) ? (saved as string) : 'gpt-image-2'
+}
+
+export function saveImageGenModel(model: string): void {
+  localStorage.setItem(CFG_MODEL, IMAGE_MODELS.some((m) => m.id === model) ? model : 'gpt-image-2')
 }
 
 export interface ImageGenRequest {
+  model: string
   prompt: string
   size: string
   resolution: string
   imageDataUrl?: string
   signal?: AbortSignal
   onProgress?: (percent: number) => void
-}
-
-export function loadImageGenConfig(): ImageGenConfig {
-  return {
-    apiUrl: localStorage.getItem(CFG_URL) || localStorage.getItem('glimmerApiUrl') || localStorage.getItem('apiUrl') || 'https://api.apimart.ai',
-    apiKey: localStorage.getItem(CFG_KEY) || localStorage.getItem('glimmerApiKey') || localStorage.getItem('apiKey') || '',
-    model: localStorage.getItem(CFG_MODEL) || 'gpt-image-2'
-  }
-}
-
-export function saveImageGenConfig(cfg: ImageGenConfig): void {
-  localStorage.setItem(CFG_URL, cfg.apiUrl.trim())
-  localStorage.setItem(CFG_KEY, cfg.apiKey.trim())
-  localStorage.setItem(CFG_MODEL, cfg.model.trim() || 'gpt-image-2')
 }
 
 function errorMessage(payload: unknown, fallback: string): string {
@@ -66,16 +60,12 @@ function extractTaskId(payload: unknown): string | null {
   return typeof id === 'string' && id ? id : null
 }
 
-async function pollTask(apiUrl: string, apiKey: string, taskId: string, onProgress?: (n: number) => void, signal?: AbortSignal): Promise<string> {
+async function pollTask(taskId: string, onProgress?: (n: number) => void, signal?: AbortSignal): Promise<string> {
   for (let attempt = 0; attempt < 90; attempt += 1) {
     if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
     await new Promise((resolve) => setTimeout(resolve, 2000))
     if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
-    const params = new URLSearchParams({ apiUrl, taskId })
-    const res = await fetch(`/api/ai/images/tasks?${params}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal
-    })
+    const res = await fetch(`/api/ai/images/tasks?taskId=${encodeURIComponent(taskId)}`, { signal })
     const payload = await res.json().catch(() => ({}))
     if (!res.ok) continue
     const task = (payload as { data?: Record<string, unknown> }).data
@@ -98,16 +88,12 @@ async function pollTask(apiUrl: string, apiKey: string, taskId: string, onProgre
 }
 
 export async function generateImage(req: ImageGenRequest): Promise<string> {
-  const cfg = loadImageGenConfig()
   const prompt = req.prompt.trim()
   if (!prompt) throw new Error('请先描述你想创造的画面')
-  if (!cfg.apiUrl.trim() || !cfg.apiKey.trim()) throw new Error('请先填写 API 地址和密钥')
 
   req.onProgress?.(8)
   const body: Record<string, unknown> = {
-    apiUrl: cfg.apiUrl.trim(),
-    apiKey: cfg.apiKey.trim(),
-    model: cfg.model.trim() || 'gpt-image-2',
+    model: req.model || 'gpt-image-2',
     prompt,
     n: 1,
     size: req.size,
@@ -132,7 +118,7 @@ export async function generateImage(req: ImageGenRequest): Promise<string> {
   const taskId = extractTaskId(payload)
   if (taskId) {
     req.onProgress?.(12)
-    const url = await pollTask(cfg.apiUrl.trim(), cfg.apiKey.trim(), taskId, req.onProgress, req.signal)
+    const url = await pollTask(taskId, req.onProgress, req.signal)
     req.onProgress?.(100)
     return url
   }

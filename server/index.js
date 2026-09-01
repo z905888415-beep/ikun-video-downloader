@@ -37,6 +37,9 @@ const MIAOCUT_TIMEOUT_MS = Number(process.env.MIAOCUT_TIMEOUT_MS || 120000)
 const MIAOCUT_MAX_UPLOAD = Number(process.env.MIAOCUT_MAX_UPLOAD || 12 * 1024 * 1024)
 const MIAOCUT_PROFILES = new Set(['sharp', 'fur'])
 const ADMIN_TOKEN = String(process.env.IKUN_ADMIN_TOKEN || '').trim()
+// 内置 GPT-Image 中转（管理员在 /etc/ikun-web.env 配置 IMAGE_API_*；密钥不进仓库）
+const IMAGE_API_BASE_URL = String(process.env.IMAGE_API_BASE_URL || 'https://api.llmfree.work').replace(/\/+$/, '')
+const IMAGE_API_KEY = String(process.env.IMAGE_API_KEY || '').trim()
 
 function positiveInteger(value, fallback) {
   const parsed = Number(value)
@@ -326,12 +329,13 @@ async function proxyImageApi(url, { method = 'GET', headers = {}, body, timeoutM
   }
 }
 
-// 浏览器 → iKun → 用户配置的 GPT-Image 中转（默认 apimart.ai），避免跨域
+// 浏览器 → iKun → 内置 GPT-Image 中转（管理员在 /etc/ikun-web.env 配置 IMAGE_API_*）。
+// 端点与密钥不下发到前端；前端只传 prompt/model/尺寸等业务参数。
 app.post('/api/ai/images/generations', aiRateLimit, async (req, res) => {
   try {
-    const apiUrl = assertPublicHttpsApi(req.body?.apiUrl || 'https://api.apimart.ai')
-    const apiKey = String(req.body?.apiKey || req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim()
-    if (!apiKey) return res.status(400).json({ error: '缺少 API 密钥' })
+    const apiUrl = assertPublicHttpsApi(IMAGE_API_BASE_URL)
+    const apiKey = IMAGE_API_KEY || String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim()
+    if (!apiKey) return res.status(503).json({ error: '生图服务未配置，请联系管理员', code: 'IMAGE_API_UNCONFIGURED' })
     const prompt = String(req.body?.prompt || '').trim()
     if (!prompt) return res.status(400).json({ error: '请填写提示词' })
     const payload = {
@@ -368,11 +372,11 @@ app.post('/api/ai/images/generations', aiRateLimit, async (req, res) => {
 
 app.get('/api/ai/images/tasks', imageTaskRateLimit, async (req, res) => {
   try {
-    const apiUrl = assertPublicHttpsApi(req.query.apiUrl || 'https://api.apimart.ai')
+    const apiUrl = assertPublicHttpsApi(IMAGE_API_BASE_URL)
     const taskId = String(req.query.taskId || '').replace(/[^a-zA-Z0-9._-]/g, '')
-    const apiKey = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim()
+    const apiKey = IMAGE_API_KEY || String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim()
     if (!taskId) return res.status(400).json({ error: '缺少 taskId' })
-    if (!apiKey) return res.status(400).json({ error: '缺少 API 密钥' })
+    if (!apiKey) return res.status(503).json({ error: '生图服务未配置，请联系管理员', code: 'IMAGE_API_UNCONFIGURED' })
     const upstream = await proxyImageApi(`${apiUrl}/v1/tasks/${encodeURIComponent(taskId)}`, {
       headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
       timeoutMs: 30000
