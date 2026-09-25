@@ -161,14 +161,60 @@ export const useAppStore = defineStore('app', () => {
 
   function startV2Polling(): void {
     if (v2PollTimer != null) return
+    // SSE 主通道（进度 ~1s），轮询 15s 兜底补齐 speed/eta/filename 等全量字段
     v2PollTimer = window.setInterval(async () => {
       if (document.hidden) return
       try {
         v2Jobs.value = await apiV2.listDownloads()
+        syncV2EventSources()
       } catch {
         // 服务不可用时不打断轮询
       }
-    }, 5000)
+    }, 15000)
+  }
+
+  /* ---------- SSE 实时进度：每个进行中任务一条事件流 ---------- */
+  const v2EventSources = new Map<string, EventSource>()
+  const ACTIVE_V2_STATUSES = ['QUEUED', 'DOWNLOADING', 'PROCESSING', 'RESOLVING']
+
+  function syncV2EventSources(): void {
+    if (typeof EventSource !== 'function') return
+    const active = v2Jobs.value.filter((j) => ACTIVE_V2_STATUSES.includes(j.status)).slice(0, 3)
+    for (const [id, source] of v2EventSources) {
+      if (!active.some((j) => j.id === id)) {
+        source.close()
+        v2EventSources.delete(id)
+      }
+    }
+    for (const job of active) {
+      if (v2EventSources.has(job.id)) continue
+      try {
+        const source = new EventSource(apiV2.downloadEventsUrl(job.id))
+        source.addEventListener('job-status', (event) => {
+          try {
+            const patch = JSON.parse((event as MessageEvent).data) as { id: string; status: string; percent: number; error?: unknown }
+            v2Jobs.value = v2Jobs.value.map((j) =>
+              j.id === patch.id ? { ...j, status: patch.status as V2Job['status'], percent: patch.percent, error: (patch.error as V2Job['error']) ?? null } : j
+            )
+            if (!ACTIVE_V2_STATUSES.includes(patch.status)) {
+              source.close()
+              v2EventSources.delete(patch.id)
+              void refreshV2Jobs()
+            }
+          } catch {
+            /* 单条事件解析失败忽略，等轮询兜底 */
+          }
+        })
+        v2EventSources.set(job.id, source)
+      } catch {
+        /* EventSource 建立失败时轮询兜底 */
+      }
+    }
+  }
+
+  function closeV2EventSources(): void {
+    for (const source of v2EventSources.values()) source.close()
+    v2EventSources.clear()
   }
 
   async function enqueueV2Action(actionId: string): Promise<V2Job | null> {
@@ -177,6 +223,7 @@ export const useAppStore = defineStore('app', () => {
       const job = await apiV2.createDownload(v2Resolution.value.id, actionId)
       v2Jobs.value = await apiV2.listDownloads()
       startV2Polling()
+      syncV2EventSources()
       setNotice(job.status === 'READY' ? '已开始下载' : `已加入队列：${job.status}`)
       return job
     } catch (e) {
@@ -205,6 +252,7 @@ export const useAppStore = defineStore('app', () => {
 
   async function refreshV2Jobs(): Promise<void> {
     v2Jobs.value = await apiV2.listDownloads()
+    syncV2EventSources()
   }
 
   async function refreshDownloadStats(): Promise<void> {

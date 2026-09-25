@@ -541,9 +541,21 @@ app.get('/api/downloads/stats', (_req, res) => {
 })
 
 if (existsSync(join(PUBLIC_DIR, 'index.html'))) {
-  app.use(express.static(PUBLIC_DIR, { index: false, maxAge: '1h' }))
+  // 带 hash 的构建产物长缓存 immutable；index.html 与其它文件 no-cache，
+  // 保证发版后浏览器立刻拿到新入口，避免引用已删除的旧 hash 资源
+  app.use(express.static(PUBLIC_DIR, {
+    index: false,
+    setHeaders: (res, filePath) => {
+      if (String(filePath).replace(/\\/g, '/').includes('/assets/')) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+      } else {
+        res.setHeader('Cache-Control', 'no-cache')
+      }
+    }
+  }))
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/')) return next()
+    res.setHeader('Cache-Control', 'no-cache')
     res.sendFile(join(PUBLIC_DIR, 'index.html'))
   })
 } else {

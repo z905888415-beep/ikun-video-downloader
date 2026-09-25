@@ -151,7 +151,32 @@ if [ "$LOCAL" != "$REMOTE" ]; then
 fi
 SYNCEOF
 chmod +x /opt/keepalive/ikun_sync.sh
-(crontab -l 2>/dev/null | grep -v "ikun_sync\|ikun_keepalive"; echo "*/2 * * * * /opt/keepalive/ikun_sync.sh") | crontab -
+(crontab -l 2>/dev/null | grep -v "ikun_sync\|ikun_keepalive\|ytdlp_update"; echo "*/2 * * * * /opt/keepalive/ikun_sync.sh") | crontab -
+
+# ---------- 6.5 yt-dlp 每周自动更新（每周一 04:20） ----------
+cat > /opt/keepalive/ytdlp_update.sh << 'UPDEOF'
+#!/bin/bash
+# yt-dlp 每周自动更新：上游反爬适配频繁，旧版会陆续失效。原子替换，无需重启服务。
+LOG=/opt/keepalive/ytdlp-update.log
+BIN=/opt/ikun-video-downloader/resources/bin/yt-dlp
+[ -x "$BIN" ] || exit 1
+CURRENT=$("$BIN" --version 2>/dev/null)
+LATEST=$(curl -sS --max-time 20 https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+[ -z "$LATEST" ] && { echo "[$(date '+%F %T')] 获取最新版本号失败" >> "$LOG"; exit 1; }
+if [ "$CURRENT" = "$LATEST" ]; then
+  echo "[$(date '+%F %T')] 已是最新 $CURRENT" >> "$LOG"
+  exit 0
+fi
+curl -sSL --max-time 120 -o /tmp/yt-dlp.new "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp" || { echo "[$(date '+%F %T')] 下载 $LATEST 失败" >> "$LOG"; exit 1; }
+chmod +x /tmp/yt-dlp.new
+NEWVER=$(/tmp/yt-dlp.new --version 2>/dev/null)
+[ "$NEWVER" = "$LATEST" ] || { echo "[$(date '+%F %T')] 校验失败（期望 $LATEST 实得 $NEWVER）" >> "$LOG"; exit 1; }
+cp "$BIN" "${BIN}.bak"
+mv -f /tmp/yt-dlp.new "$BIN"
+echo "[$(date '+%F %T')] 已更新 $CURRENT -> $LATEST" >> "$LOG"
+UPDEOF
+chmod +x /opt/keepalive/ytdlp_update.sh
+(crontab -l 2>/dev/null | grep -v "ytdlp_update"; echo "20 4 * * 1 /opt/keepalive/ytdlp_update.sh") | crontab -
 
 # ---------- 7. 验收测试 ----------
 sleep 2

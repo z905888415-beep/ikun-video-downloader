@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, defineAsyncComponent, h, onMounted } from 'vue'
 import { useAppStore, type PageId } from './stores/app'
 import Icon from './components/Icon.vue'
 import HomeView from './views/HomeView.vue'
-import ImagineView from './views/ImagineView.vue'
-import CutoutView from './views/CutoutView.vue'
-import ToolboxView from './views/ToolboxView.vue'
-import HistoryView from './views/HistoryView.vue'
-import SettingsView from './views/SettingsView.vue'
+
+const PageLoading = () => h('div', { class: 'page-loading' }, '加载中…')
+function asyncView(loader: () => Promise<unknown>) {
+  return defineAsyncComponent({ loader: loader as () => Promise<unknown>, loadingComponent: PageLoading, delay: 120 })
+}
+// 非首页视图异步加载：首页入口 JS 大幅瘦身，进入对应页时才拉取分块
+const ImagineView = asyncView(() => import('./views/ImagineView.vue'))
+const CutoutView = asyncView(() => import('./views/CutoutView.vue'))
+const ToolboxView = asyncView(() => import('./views/ToolboxView.vue'))
+const HistoryView = asyncView(() => import('./views/HistoryView.vue'))
+const SettingsView = asyncView(() => import('./views/SettingsView.vue'))
 
 const store = useAppStore()
 
@@ -120,5 +126,12 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.page-loading {
+  padding: 72px 0;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 13px;
 }
 </style>

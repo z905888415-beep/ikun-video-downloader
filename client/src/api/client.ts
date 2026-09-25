@@ -200,5 +200,9 @@ export const apiV2 = {
   fileUrl: (jobId: string) => {
     const token = loadJobTokens()[jobId]
     return token ? `/api/v2/assets/${jobId}/content?token=${encodeURIComponent(token)}` : `/api/v2/assets/${jobId}/content`
+  },
+  downloadEventsUrl: (jobId: string) => {
+    const token = loadJobTokens()[jobId]
+    return token ? `/api/v2/downloads/${jobId}/events?token=${encodeURIComponent(token)}` : `/api/v2/downloads/${jobId}/events`
   }
 }
