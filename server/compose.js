@@ -36,14 +36,23 @@ export function composeApp({ settings = {} } = {}) {
     cookies: settings.douyinCookies || ''
   }))
   registry.register(createTwitterPhotoProvider())
-  registry.register(createYtdlpProvider({
-    binDir: BIN_DIR,
-    cookiesFile: settings.cookiesFile,
-    proxy: settings.proxy,
-    retries: settings.retries,
-    fragmentConcurrency: settings.fragmentConcurrency,
-    customHeaders: settings.customHeaders
-  }))
+  // YouTube 网页挑战需要 Node >= 22 运行时（EJS）。自动探测 BIN_DIR 下的独立
+  // Node22（jsruntime-node，由部署脚本安装），不依赖系统 Node 版本。
+  const jsRuntimeNode = existsSync(join(BIN_DIR, 'jsruntime-node')) ? join(BIN_DIR, 'jsruntime-node') : ''
+
+  function ytdlpOptions(next) {
+    return {
+      binDir: BIN_DIR,
+      cookiesFile: next.cookiesFile,
+      proxy: next.proxy,
+      retries: next.retries,
+      fragmentConcurrency: next.fragmentConcurrency,
+      customHeaders: next.customHeaders,
+      jsRuntimeNode
+    }
+  }
+
+  registry.register(createYtdlpProvider(ytdlpOptions(settings)))
   const resolutions = createResolutionService({ registry, assets })
   const store = createJobStore({ filePath: join(DATA_DIR, 'jobs.json') })
   const retry = createRetryPolicy({ maxAttempts: settings.maxAttempts ?? 3 })
@@ -89,14 +98,7 @@ export function composeApp({ settings = {} } = {}) {
 
   function applySettings(next) {
     scheduler.setConcurrency(next.concurrency || 2)
-    registry.replace('ytdlp', createYtdlpProvider({
-      binDir: BIN_DIR,
-      cookiesFile: next.cookiesFile,
-      proxy: next.proxy,
-      retries: next.retries,
-      fragmentConcurrency: next.fragmentConcurrency,
-      customHeaders: next.customHeaders
-    }))
+    registry.replace('ytdlp', createYtdlpProvider(ytdlpOptions(next)))
   }
 
   return { resolutions, assets, store, scheduler, deliveries, registry, applySettings }

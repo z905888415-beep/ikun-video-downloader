@@ -60,6 +60,35 @@ test('YtdlpProvider 将 Cookie 需求映射为不可重试错误', async () => {
   await assert.rejects(() => provider.resolve('https://example.com/video'), (error) => error.code === 'AUTH_REQUIRED' && error.retryable === false)
 })
 
+test('YtdlpProvider 在提供 Node 运行时路径时追加 --js-runtimes', async () => {
+  let capturedArgs = []
+  const provider = createYtdlpProvider({
+    binDir: 'fake-bin',
+    jsRuntimeNode: process.execPath,
+    execFileImpl: async (_bin, args) => {
+      capturedArgs = args
+      return { stdout: sampleDumpJson(), stderr: '' }
+    }
+  })
+  await provider.resolve('https://example.com/video')
+  const i = capturedArgs.indexOf('--js-runtimes')
+  assert.ok(i >= 0, '应包含 --js-runtimes')
+  assert.equal(capturedArgs[i + 1], `node:${process.execPath}`)
+})
+
+test('YtdlpProvider 未提供 Node 运行时时不应带 --js-runtimes', async () => {
+  let capturedArgs = []
+  const provider = createYtdlpProvider({
+    binDir: 'fake-bin',
+    execFileImpl: async (_bin, args) => {
+      capturedArgs = args
+      return { stdout: sampleDumpJson(), stderr: '' }
+    }
+  })
+  await provider.resolve('https://example.com/video')
+  assert.ok(!capturedArgs.includes('--js-runtimes'))
+})
+
 test('YtdlpProvider 丢弃非 HTTP 媒体地址', async () => {
   const dump = JSON.stringify({
     id: 'vid3', title: '协议过滤', formats: [

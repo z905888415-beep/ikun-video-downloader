@@ -78,6 +78,16 @@ fi
 "$BIN_DIR/yt-dlp" --version && "$BIN_DIR/ffmpeg" -version 2>&1 | head -1
 echo "✅ Linux 二进制就绪: $BIN_DIR"
 
+# ---------- 3.5 Node22 运行时（YouTube 网页挑战 EJS，免 cookies 解析） ----------
+if [ ! -x "$BIN_DIR/jsruntime-node" ]; then
+  echo "⏳ 下载 Node22 运行时…"
+  curl -sSL -o /tmp/node22.tar.xz https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz
+  tar -xf /tmp/node22.tar.xz -C /tmp
+  install -m 0755 /tmp/node-v22.14.0-linux-x64/bin/node "$BIN_DIR/jsruntime-node"
+  rm -rf /tmp/node22.tar.xz /tmp/node-v22.14.0-linux-x64
+fi
+"$BIN_DIR/jsruntime-node" -v
+
 # ---------- 4. 写入生产环境变量 ----------
 if [ -z "$ADMIN_TOKEN" ]; then
   ADMIN_TOKEN="ikun_$(head -c 24 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 32)"

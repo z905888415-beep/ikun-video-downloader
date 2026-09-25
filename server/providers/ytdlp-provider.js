@@ -47,7 +47,8 @@ export function createYtdlpProvider({
   proxy = '',
   retries = 10,
   fragmentConcurrency = 4,
-  customHeaders = ''
+  customHeaders = '',
+  jsRuntimeNode = ''
 } = {}) {
   return {
     id: 'ytdlp',
@@ -70,6 +71,11 @@ export function createYtdlpProvider({
       }
       if (cookiesFile && existsSync(cookiesFile)) {
         args.push('--cookies', cookiesFile)
+      }
+      // 新版 YouTube 抽取需要外部 JS 运行时解网页挑战（EJS，要求 Node >= 22）。
+      // 显式指定路径，不依赖 PATH 探测；有它即可在无 cookies 时解析 YouTube。
+      if (jsRuntimeNode && existsSync(jsRuntimeNode)) {
+        args.push('--js-runtimes', `node:${jsRuntimeNode}`)
       }
       if (proxy) {
         args.push('--proxy', proxy)
