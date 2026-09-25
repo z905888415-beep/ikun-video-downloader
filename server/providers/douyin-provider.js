@@ -1,7 +1,9 @@
 import { createResolution, createAsset, createAction } from '../core/contracts.js'
 import { AppError } from '../core/errors.js'
+import { getDouyinGuestCookie } from '../core/guest-cookies.js'
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
 
 /**
  * 从输入 URL 中解析出 aweme_id (视频/图集 ID)
@@ -19,6 +21,37 @@ export function extractAwemeId(urlStr) {
   if (queryMatch) return queryMatch[1]
 
   return ''
+}
+
+/**
+ * 分享页解析：GET /share/video|note/<id>/，从 window._ROUTER_DATA 提取 item_list[0]
+ * （结构与官方 aweme_detail 一致：video.play_addr / bit_rate / images / music）
+ */
+export async function fetchShareAweme(fetchImpl, awemeId, cookieHeader) {
+  for (const kind of ['video', 'note']) {
+    try {
+      const res = await fetchImpl(`https://www.iesdouyin.com/share/${kind}/${awemeId}/`, {
+        headers: {
+          'User-Agent': MOBILE_UA,
+          'Referer': 'https://www.douyin.com/',
+          ...(cookieHeader ? { Cookie: cookieHeader } : {})
+        }
+      })
+      if (!res.ok) continue
+      const html = await res.text()
+      const m = html.match(/window\._ROUTER_DATA\s*=\s*(\{[\s\S]*?\})\s*;?\s*<\/script>/)
+      if (!m) continue
+      const data = JSON.parse(m[1])
+      const loader = data?.loaderData || {}
+      for (const key of Object.keys(loader)) {
+        const list = loader[key]?.videoInfoRes?.item_list
+        if (Array.isArray(list) && list.length) return list[0]
+      }
+    } catch {
+      // 换下一种分享页形态
+    }
+  }
+  return null
 }
 
 /**
@@ -58,29 +91,34 @@ export function createDouyinProvider({
         throw new AppError('PROVIDER_FAILED', '未能从抖音链接中提取出作品 ID', true)
       }
 
-      // 2. 依次使用 aid 候选池请求官方接口（6383 适合图文/图集，1128 适合单视频）
-      const aids = ['6383', '1128']
-      let awemeDetail = null
+      // 2. 主路径：分享页（移动 UA + 游客 ttwid），页面内嵌 _ROUTER_DATA，无需签名
+      //    备用路径：旧的 iesdouyin 官方 detail 接口（可能 403，保留降级）
+      const staticCookies = typeof cookies === 'string' ? cookies : ''
+      const guestCookie = staticCookies || (await getDouyinGuestCookie(fetchImpl))
+      let awemeDetail = await fetchShareAweme(fetchImpl, awemeId, guestCookie)
 
-      for (const aid of aids) {
-        const apiUrl = `https://www.iesdouyin.com/aweme/v1/web/aweme/detail/?aweme_id=${awemeId}&aid=${aid}&device_platform=webapp&channel=channel_pc_web`
-        try {
-          const res = await fetchImpl(apiUrl, {
-            headers: {
-              'User-Agent': UA,
-              'Referer': 'https://www.douyin.com/',
-              'Accept': 'application/json',
-              ...(cookies ? { Cookie: cookies } : {})
+      if (!awemeDetail) {
+        const aids = ['6383', '1128']
+        for (const aid of aids) {
+          const apiUrl = `https://www.iesdouyin.com/aweme/v1/web/aweme/detail/?aweme_id=${awemeId}&aid=${aid}&device_platform=webapp&channel=channel_pc_web`
+          try {
+            const res = await fetchImpl(apiUrl, {
+              headers: {
+                'User-Agent': UA,
+                'Referer': 'https://www.douyin.com/',
+                'Accept': 'application/json',
+                ...(guestCookie ? { Cookie: guestCookie } : {})
+              }
+            })
+            if (!res.ok) continue
+            const data = await res.json()
+            if (data && data.aweme_detail) {
+              awemeDetail = data.aweme_detail
+              break
             }
-          })
-          if (!res.ok) continue
-          const data = await res.json()
-          if (data && data.aweme_detail) {
-            awemeDetail = data.aweme_detail
-            break
+          } catch {
+            // 继续尝试下一个 aid
           }
-        } catch {
-          // 继续尝试下一个 aid
         }
       }
 
